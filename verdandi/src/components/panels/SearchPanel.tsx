@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useCallback, useEffect } from 'react';
-import { Search, X, Table2, Code2, Columns3, Eye } from 'lucide-react';
+import { Search, X, Table2, Code2, Columns3, Eye, Database, AppWindow, Variable, Braces } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLoomStore } from '../../stores/loomStore';
 import { useSearch } from '../../services/hooks';
@@ -16,11 +16,20 @@ function TypeIcon({ type }: { type: string }) {
     case 'DaliOutputColumn':
       return <Columns3 size={size} color="var(--inf)" strokeWidth={1.5} />;
     case 'DaliRoutine':
+    case 'DaliPackage':
     case 'DaliStatement':
     case 'DaliSession':
       return <Code2 size={size} color="var(--suc)" strokeWidth={1.5} />;
+    case 'DaliParameter':
+    case 'DaliVariable':
+      return <Variable size={size} color="var(--suc)" strokeWidth={1.5} />;
+    case 'DaliSchema':
+    case 'DaliDatabase':
+      return <Database size={size} color="var(--t3)" strokeWidth={1.5} />;
+    case 'DaliApplication':
+      return <AppWindow size={size} color="var(--t2)" strokeWidth={1.5} />;
     default:
-      return <span style={{ width: size, height: size, display: 'inline-block' }} />;
+      return <Braces size={size} color="var(--t3)" strokeWidth={1.5} />;
   }
 }
 
@@ -207,8 +216,8 @@ export const SearchPanel = memo(() => {
   const results = (searchQ.data ?? []).filter((r) => {
     if (typeFilters.size === 0) return true;
     if (typeFilters.has('tables')       && r.type === 'DaliTable') return true;
-    if (typeFilters.has('routines')     && (r.type === 'DaliRoutine' || r.type === 'DaliPackage' || r.type === 'DaliSession')) return true;
     if (typeFilters.has('columns')      && (r.type === 'DaliColumn' || r.type === 'DaliOutputColumn')) return true;
+    if (typeFilters.has('routines')     && (r.type === 'DaliRoutine' || r.type === 'DaliPackage' || r.type === 'DaliSession' || r.type === 'DaliParameter' || r.type === 'DaliVariable')) return true;
     if (typeFilters.has('statements')   && r.type === 'DaliStatement') return true;
     if (typeFilters.has('databases')    && (r.type === 'DaliDatabase' || r.type === 'DaliSchema')) return true;
     if (typeFilters.has('applications') && r.type === 'DaliApplication') return true;
