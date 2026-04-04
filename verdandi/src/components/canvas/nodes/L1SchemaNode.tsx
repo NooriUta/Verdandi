@@ -37,7 +37,7 @@ export const L1SchemaNode = memo(({ data, selected, id }: NodeProps<L1SchemaNode
         boxSizing:     'border-box' as const,
       }}
       onClick={(e) => { e.stopPropagation(); selectNode(id); }}
-      onDoubleClick={(e) => { e.stopPropagation(); drillDown(id, data.label, 'DaliSchema'); }}
+      onDoubleClick={(e) => { e.stopPropagation(); drillDown(`schema-${data.label}`, data.label, 'DaliSchema'); }}
     >
       {/* Colour dot */}
       <span style={{
