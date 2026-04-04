@@ -73,6 +73,8 @@ interface LoomStore {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   drillDown: (nodeId: string, label: string, nodeType?: DaliNodeType) => void;
+  /** Jump directly to a specific level + scope, regardless of current level (used by SearchPanel). */
+  jumpTo: (level: ViewLevel, scope: string | null, label: string, nodeType?: DaliNodeType) => void;
   navigateBack: (index: number) => void;
   navigateToLevel: (level: ViewLevel) => void;
   selectNode: (nodeId: string | null) => void;
@@ -177,6 +179,27 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       filter: {
         ...FILTER_DEFAULTS,
         startObjectId:    nodeId,
+        startObjectType:  nodeType ?? null,
+        startObjectLabel: label,
+      },
+    });
+  },
+
+  // ── jumpTo: direct navigation from search results (no level dependency) ───
+  jumpTo: (level, scope, label, nodeType) => {
+    console.log(`[LOOM] jumpTo → ${level}, scope=${scope}, label=${label}`);
+    set({
+      viewLevel:          level,
+      currentScope:       scope,
+      currentScopeLabel:  label,
+      navigationStack:    [],
+      l1ScopeStack:       [],
+      expandedDbs:        new Set<string>(),
+      selectedNodeId:     null,
+      availableFields:    [],
+      filter: {
+        ...FILTER_DEFAULTS,
+        startObjectId:    scope,
         startObjectType:  nodeType ?? null,
         startObjectLabel: label,
       },

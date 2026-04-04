@@ -153,7 +153,7 @@ function SectionLabel({ label }: { label: string }) {
 
 export const SearchPanel = memo(() => {
   const { t } = useTranslation();
-  const { drillDown, selectNode, hiddenNodeIds, restoreNode, showAllNodes } = useLoomStore();
+  const { jumpTo, selectNode, hiddenNodeIds, restoreNode, showAllNodes } = useLoomStore();
 
   const [query, setQuery]              = useState('');
   const [debouncedQuery, setDebounced] = useState('');
@@ -215,20 +215,27 @@ export const SearchPanel = memo(() => {
     return false;
   });
 
-  // Handle result click
+  // Handle result click — deterministic navigation regardless of current level
   const handleSelect = useCallback((result: SearchResult) => {
     const type = result.type as string;
     if (type === 'DaliTable') {
-      // Drill down to L3 column lineage for this table
-      drillDown(result.id, result.label, 'DaliTable');
-    } else if (type === 'DaliSchema' || type === 'DaliPackage') {
-      const scope = type === 'DaliSchema' ? `schema-${result.label}` : result.id;
-      drillDown(scope, result.label, type as never);
+      // L3: column-level lineage for this table
+      jumpTo('L3', result.id, result.label, 'DaliTable');
+    } else if (type === 'DaliSchema') {
+      // L2: explore this schema
+      jumpTo('L2', `schema-${result.label}`, result.label, 'DaliSchema');
+    } else if (type === 'DaliPackage') {
+      // L2: explore this package
+      jumpTo('L2', result.id, result.label, 'DaliPackage');
+    } else if (type === 'DaliDatabase' || type === 'DaliApplication') {
+      // L1: go to overview, select/highlight that node
+      jumpTo('L1', null, result.label);
+      selectNode(result.id);
     } else {
-      // Highlight / select on current canvas
+      // Routines, Statements, Columns — highlight on current canvas
       selectNode(result.id);
     }
-  }, [drillDown, selectNode]);
+  }, [jumpTo, selectNode]);
 
   const tabs: { key: string; label: string }[] = [
     { key: 'all',          label: t('search.filters.all') },
