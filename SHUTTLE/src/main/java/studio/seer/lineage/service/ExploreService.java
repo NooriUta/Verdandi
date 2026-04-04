@@ -42,24 +42,20 @@ public class ExploreService {
     // ── Schema scope ──────────────────────────────────────────────────────────
 
     private Uni<ExploreResult> exploreSchema(String schemaName) {
-        // Tables — use projected Cypher, edge IDs computed from src+tgt+type
+        // ArcadeDB Cypher: use id() for @rid, labels()[0] for @type.
+        // UNION ALL works in Cypher but not in ArcadeDB SQL — keep Cypher.
+        // CONTAINS_PACKAGE removed in schema v6; packages live under CONTAINS_ROUTINE (DaliPackage IS-A DaliRoutine).
         String cypher = """
             MATCH (s:DaliSchema {schema_name: $schema})-[:CONTAINS_TABLE]->(t:DaliTable)
-            RETURN s.@rid AS srcId, s.schema_name AS srcLabel,
-                   t.@rid AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+            RETURN id(s) AS srcId, s.schema_name AS srcLabel,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
                    'DaliTable' AS tgtType, 'CONTAINS_TABLE' AS edgeType
             LIMIT 300
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})-[:CONTAINS_PACKAGE]->(p:DaliPackage)
-            RETURN s.@rid AS srcId, s.schema_name AS srcLabel,
-                   p.@rid AS tgtId, p.package_name AS tgtLabel, '' AS tgtScope,
-                   'DaliPackage' AS tgtType, 'CONTAINS_PACKAGE' AS edgeType
-            LIMIT 100
-            UNION ALL
             MATCH (s:DaliSchema {schema_name: $schema})-[:CONTAINS_ROUTINE]->(r:DaliRoutine)
-            RETURN s.@rid AS srcId, s.schema_name AS srcLabel,
-                   r.@rid AS tgtId, r.routine_name AS tgtLabel, r.schema_geoid AS tgtScope,
-                   'DaliRoutine' AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
+            RETURN id(s) AS srcId, s.schema_name AS srcLabel,
+                   id(r) AS tgtId, r.routine_name AS tgtLabel, r.schema_geoid AS tgtScope,
+                   labels(r)[0] AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
             LIMIT 100
             """;
 
@@ -73,14 +69,14 @@ public class ExploreService {
         // Routines inside the package + tables the package uses
         String cypher = """
             MATCH (p:DaliPackage {package_name: $pkg})-[:CONTAINS_ROUTINE]->(r:DaliRoutine)
-            RETURN p.@rid AS srcId, p.package_name AS srcLabel,
-                   r.@rid AS tgtId, r.routine_name AS tgtLabel, r.package_geoid AS tgtScope,
+            RETURN id(p) AS srcId, p.package_name AS srcLabel,
+                   id(r) AS tgtId, r.routine_name AS tgtLabel, r.package_geoid AS tgtScope,
                    'DaliRoutine' AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
             LIMIT 200
             UNION ALL
             MATCH (p:DaliPackage {package_name: $pkg})-[:ROUTINE_USES_TABLE]->(t:DaliTable)
-            RETURN p.@rid AS srcId, p.package_name AS srcLabel,
-                   t.@rid AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+            RETURN id(p) AS srcId, p.package_name AS srcLabel,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
                    'DaliTable' AS tgtType, 'ROUTINE_USES_TABLE' AS edgeType
             LIMIT 100
             """;
@@ -94,10 +90,10 @@ public class ExploreService {
     private Uni<ExploreResult> exploreByRid(String rid) {
         String cypher = """
             MATCH (n)-[r]->(m)
-            WHERE n.@rid = $rid
-            RETURN n.@rid AS srcId, coalesce(n.schema_name, n.table_name, n.package_name, n.routine_name, '') AS srcLabel,
-                   m.@rid AS tgtId, coalesce(m.schema_name, m.table_name, m.package_name, m.routine_name, m.column_name, '') AS tgtLabel,
-                   m.schema_geoid AS tgtScope, m.@type AS tgtType, type(r) AS edgeType
+            WHERE id(n) = $rid
+            RETURN id(n) AS srcId, coalesce(n.schema_name, n.table_name, n.package_name, n.routine_name, '') AS srcLabel,
+                   id(m) AS tgtId, coalesce(m.schema_name, m.table_name, m.package_name, m.routine_name, m.column_name, '') AS tgtLabel,
+                   m.schema_geoid AS tgtScope, labels(m)[0] AS tgtType, type(r) AS edgeType
             LIMIT 300
             """;
 
@@ -190,7 +186,10 @@ public class ExploreService {
 
     private static String str(Map<String, Object> row, String key) {
         Object v = row.get(key);
-        return v != null ? v.toString() : "";
+        if (v == null) return "";
+        // labels()[0] returns a List<String> in ArcadeDB Cypher — unwrap first element
+        if (v instanceof java.util.List<?> list) return list.isEmpty() ? "" : list.get(0).toString();
+        return v.toString();
     }
 
     // ── Scope parser ──────────────────────────────────────────────────────────
