@@ -1,0 +1,3 @@
+// Subproject settings — pluginManagement is in the root settings.gradle
+// Run from root: ./gradlew :SHUTTLE:quarkusDev
+rootProject.name = 'SHUTTLE'

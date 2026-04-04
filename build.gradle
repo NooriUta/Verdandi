@@ -1,0 +1,10 @@
+// VERDANDI monorepo root
+//
+// Modules:
+//   SHUTTLE   — Quarkus 3.34.2 / Java 21  (lineage GraphQL API)
+//   Chur      — Fastify / Node.js 22       (RBAC proxy, auth gateway)  [package.json]
+//   verdandi  — React 19 / Vite 8          (LOOM frontend)             [package.json]
+//
+// Usage:
+//   ./gradlew :SHUTTLE:quarkusDev      — start lineage API in dev mode
+//   ./gradlew :SHUTTLE:build           — build SHUTTLE fat-jar

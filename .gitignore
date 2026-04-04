@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+**/build/
+**/.gradle/
+
+# Maven
+target/
+**/.mvn/
+
+# Node
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Logs
+*.log
+/tmp/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local

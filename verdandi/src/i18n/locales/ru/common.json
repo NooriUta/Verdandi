@@ -1,0 +1,52 @@
+{
+  "app": { "title": "SEER Studio", "tagline": "Визуализатор линейки данных" },
+  "nav": {
+    "loom": "LOOM",
+    "anvil": "ANVIL",
+    "shuttle": "SHUTTLE",
+    "knot": "KNOT"
+  },
+  "auth": {
+    "login": "Войти",
+    "logout": "Выйти",
+    "username": "Логин",
+    "password": "Пароль",
+    "signingIn": "Вход…",
+    "error": {
+      "invalid": "Неверный логин или пароль.",
+      "required": "Поле обязательно",
+      "server": "Ошибка сервера. Попробуйте ещё раз.",
+      "network": "Нет соединения с сервером. Проверьте сеть."
+    }
+  },
+  "canvas": {
+    "nodes": "узлов",
+    "edges": "рёбер",
+    "level": "Уровень",
+    "zoom": "Масштаб",
+    "computingLayout": "вычисляется граф…"
+  },
+  "nodes": {
+    "tables": "таблиц",
+    "routines": "процедур",
+    "columns": "колонок",
+    "moreColumns": "+{{count}} ещё"
+  },
+  "breadcrumb": { "overview": "Обзор" },
+  "theme": { "dark": "Тёмная", "light": "Светлая" },
+  "palette": {
+    "title": "Палитра",
+    "amberForest": "Янтарный лес",
+    "lichen": "Лишайник",
+    "slate": "Сланец",
+    "juniper": "Можжевельник",
+    "warmDark": "Тёплая тёмная"
+  },
+  "language": { "en": "English", "ru": "Русский" },
+  "status": {
+    "loading": "Загрузка…",
+    "error": "Не удалось загрузить данные",
+    "empty": "Узлы не найдены",
+    "unauthorized": "Сессия истекла. Войдите снова."
+  }
+}

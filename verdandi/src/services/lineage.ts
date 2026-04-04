@@ -1,0 +1,155 @@
+import { GraphQLClient, ClientError } from 'graphql-request';
+
+// ── Endpoint ──────────────────────────────────────────────────────────────────
+// All requests go through rbac-proxy (3000) — JWT cookie is sent automatically.
+// rbac-proxy verifies auth and forwards to lineage-api (8080) with X-Seer headers.
+const ENDPOINT = import.meta.env.VITE_GRAPHQL_URL ?? 'http://localhost:3000/graphql';
+
+const gqlClient = new GraphQLClient(ENDPOINT, {
+  credentials: 'include',  // send httpOnly JWT cookie cross-origin
+});
+
+// ── Domain types (mirror GraphQL schema from lineage-api) ─────────────────────
+
+export interface SchemaNode {
+  id: string;
+  name: string;
+  tableCount: number;
+  routineCount: number;
+  packageCount: number;
+}
+
+export interface GraphNode {
+  id: string;
+  type: string;
+  label: string;
+  scope: string;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface ExploreResult {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface SearchResult {
+  id: string;
+  type: string;
+  label: string;
+  scope: string;
+  score: number;
+}
+
+// ── Queries ───────────────────────────────────────────────────────────────────
+
+const OVERVIEW = /* GraphQL */ `
+  query Overview {
+    overview {
+      id
+      name
+      tableCount
+      routineCount
+      packageCount
+    }
+  }
+`;
+
+const EXPLORE = /* GraphQL */ `
+  query Explore($scope: String!) {
+    explore(scope: $scope) {
+      nodes { id type label scope }
+      edges { id source target type }
+    }
+  }
+`;
+
+const LINEAGE = /* GraphQL */ `
+  query Lineage($nodeId: String!) {
+    lineage(nodeId: $nodeId) {
+      nodes { id type label scope }
+      edges { id source target type }
+    }
+  }
+`;
+
+const UPSTREAM = /* GraphQL */ `
+  query Upstream($nodeId: String!) {
+    upstream(nodeId: $nodeId) {
+      nodes { id type label scope }
+      edges { id source target type }
+    }
+  }
+`;
+
+const DOWNSTREAM = /* GraphQL */ `
+  query Downstream($nodeId: String!) {
+    downstream(nodeId: $nodeId) {
+      nodes { id type label scope }
+      edges { id source target type }
+    }
+  }
+`;
+
+const SEARCH = /* GraphQL */ `
+  query Search($query: String!, $limit: Int) {
+    search(query: $query, limit: $limit) {
+      id type label scope score
+    }
+  }
+`;
+
+// ── Service functions ─────────────────────────────────────────────────────────
+
+export async function fetchOverview(): Promise<SchemaNode[]> {
+  const data = await gqlClient.request<{ overview: SchemaNode[] }>(OVERVIEW);
+  return data.overview;
+}
+
+export async function fetchExplore(scope: string): Promise<ExploreResult> {
+  const data = await gqlClient.request<{ explore: ExploreResult }>(EXPLORE, { scope });
+  return data.explore;
+}
+
+export async function fetchLineage(nodeId: string): Promise<ExploreResult> {
+  const data = await gqlClient.request<{ lineage: ExploreResult }>(LINEAGE, { nodeId });
+  return data.lineage;
+}
+
+export async function fetchUpstream(nodeId: string): Promise<ExploreResult> {
+  const data = await gqlClient.request<{ upstream: ExploreResult }>(UPSTREAM, { nodeId });
+  return data.upstream;
+}
+
+export async function fetchDownstream(nodeId: string): Promise<ExploreResult> {
+  const data = await gqlClient.request<{ downstream: ExploreResult }>(DOWNSTREAM, { nodeId });
+  return data.downstream;
+}
+
+export async function fetchSearch(query: string, limit = 20): Promise<SearchResult[]> {
+  const data = await gqlClient.request<{ search: SearchResult[] }>(SEARCH, { query, limit });
+  return data.search;
+}
+
+// ── Error helpers ─────────────────────────────────────────────────────────────
+
+/** Returns true if the error is a 401 (session expired) */
+export function isUnauthorized(err: unknown): boolean {
+  if (err instanceof ClientError) {
+    return err.response?.status === 401;
+  }
+  return false;
+}
+
+/** Returns true if the lineage-api is unreachable (503) */
+export function isUnavailable(err: unknown): boolean {
+  if (err instanceof ClientError) {
+    return err.response?.status === 503;
+  }
+  return false;
+}

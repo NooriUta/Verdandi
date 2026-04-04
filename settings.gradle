@@ -1,0 +1,11 @@
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = 'VERDANDI'
+
+// SHUTTLE — Quarkus lineage API (Java 21)
+include 'SHUTTLE'

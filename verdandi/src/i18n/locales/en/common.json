@@ -1,0 +1,52 @@
+{
+  "app": { "title": "SEER Studio", "tagline": "Data Lineage Explorer" },
+  "nav": {
+    "loom": "LOOM",
+    "anvil": "ANVIL",
+    "shuttle": "SHUTTLE",
+    "knot": "KNOT"
+  },
+  "auth": {
+    "login": "Sign In",
+    "logout": "Log Out",
+    "username": "Username",
+    "password": "Password",
+    "signingIn": "Signing in…",
+    "error": {
+      "invalid": "Invalid username or password.",
+      "required": "This field is required",
+      "server": "Server error. Please try again.",
+      "network": "Cannot connect to server. Check your network."
+    }
+  },
+  "canvas": {
+    "nodes": "nodes",
+    "edges": "edges",
+    "level": "Level",
+    "zoom": "Zoom",
+    "computingLayout": "computing layout…"
+  },
+  "nodes": {
+    "tables": "tables",
+    "routines": "routines",
+    "columns": "columns",
+    "moreColumns": "+{{count}} more"
+  },
+  "breadcrumb": { "overview": "Overview" },
+  "theme": { "dark": "Dark", "light": "Light" },
+  "palette": {
+    "title": "Palette",
+    "amberForest": "Amber Forest",
+    "lichen": "Lichen",
+    "slate": "Slate",
+    "juniper": "Juniper",
+    "warmDark": "Warm Dark"
+  },
+  "language": { "en": "English", "ru": "Русский" },
+  "status": {
+    "loading": "Loading…",
+    "error": "Failed to load data",
+    "empty": "No nodes found",
+    "unauthorized": "Session expired. Please sign in again."
+  }
+}
