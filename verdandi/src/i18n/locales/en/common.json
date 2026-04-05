@@ -70,8 +70,10 @@
       "all": "All",
       "tables": "Tables",
       "routines": "Routines",
+      "statements": "Statements",
       "columns": "Columns",
-      "statements": "Statements"
+      "databases": "Databases",
+      "applications": "Applications"
     },
     "sections": {
       "sources": "Sources",
@@ -286,6 +288,8 @@
     "dbUnit":          "DB",
     "appBadge":        "App",
     "allSystems":      "all systems",
+    "allDbs":          "all DBs",
+    "allSchemas":      "all schemas",
     "clearScope":      "Clear scope",
     "systemLevel":     "System-level",
     "systemLevelHint": "Show applications only, hide databases"

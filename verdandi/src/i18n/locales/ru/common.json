@@ -70,8 +70,10 @@
       "all": "Все",
       "tables": "Таблицы",
       "routines": "Процедуры",
+      "statements": "Трансформации",
       "columns": "Колонки",
-      "statements": "Стейтменты"
+      "databases": "СУБД",
+      "applications": "Приложения"
     },
     "sections": {
       "sources": "Источники",
@@ -286,6 +288,8 @@
     "dbUnit":          "СУБД",
     "appBadge":        "App",
     "allSystems":      "все системы",
+    "allDbs":          "все БД",
+    "allSchemas":      "все схемы",
     "clearScope":      "Сбросить скоуп",
     "systemLevel":     "Системный вид",
     "systemLevelHint": "Показать только приложения, скрыть СУБД"

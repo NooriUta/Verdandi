@@ -1,5 +1,5 @@
-import { memo, useState, useRef, useCallback } from 'react';
-import { Search, X, Table2, Code2, Columns3, Eye } from 'lucide-react';
+import { memo, useState, useRef, useCallback, useEffect } from 'react';
+import { Search, X, Table2, Code2, Columns3, Eye, Database, AppWindow, Variable, Braces } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLoomStore } from '../../stores/loomStore';
 import { useSearch } from '../../services/hooks';
@@ -16,11 +16,20 @@ function TypeIcon({ type }: { type: string }) {
     case 'DaliOutputColumn':
       return <Columns3 size={size} color="var(--inf)" strokeWidth={1.5} />;
     case 'DaliRoutine':
+    case 'DaliPackage':
     case 'DaliStatement':
     case 'DaliSession':
       return <Code2 size={size} color="var(--suc)" strokeWidth={1.5} />;
+    case 'DaliParameter':
+    case 'DaliVariable':
+      return <Variable size={size} color="var(--suc)" strokeWidth={1.5} />;
+    case 'DaliSchema':
+    case 'DaliDatabase':
+      return <Database size={size} color="var(--t3)" strokeWidth={1.5} />;
+    case 'DaliApplication':
+      return <AppWindow size={size} color="var(--t2)" strokeWidth={1.5} />;
     default:
-      return <span style={{ width: size, height: size, display: 'inline-block' }} />;
+      return <Braces size={size} color="var(--t3)" strokeWidth={1.5} />;
   }
 }
 
@@ -153,12 +162,14 @@ function SectionLabel({ label }: { label: string }) {
 
 export const SearchPanel = memo(() => {
   const { t } = useTranslation();
-  const { drillDown, selectNode, hiddenNodeIds, restoreNode, showAllNodes } = useLoomStore();
+  const { jumpTo, selectNode, hiddenNodeIds, restoreNode, showAllNodes } = useLoomStore();
 
-  const [query, setQuery]               = useState('');
-  const [debouncedQuery, setDebounced]  = useState('');
-  const [typeFilter, setTypeFilter]     = useState<string>('all');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [query, setQuery]              = useState('');
+  const [debouncedQuery, setDebounced] = useState('');
+  const [typeFilters, setTypeFilters]  = useState<Set<string>>(new Set());
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabsRef   = useRef<HTMLDivElement>(null);
 
   // Debounced input: fire search 300ms after last keystroke
   const handleInput = useCallback((value: string) => {
@@ -175,36 +186,107 @@ export const SearchPanel = memo(() => {
 
   const searchQ = useSearch(debouncedQuery.length >= 2 ? debouncedQuery : '');
 
-  // Filter results by type tab
+  // Track tab-bar overflow to show/hide ">>" scroll button
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const check = () => setCanScrollRight(el.scrollWidth > el.clientWidth + 2);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    el.addEventListener('scroll', check);
+    return () => { ro.disconnect(); el.removeEventListener('scroll', check); };
+  }, []);
+
+  // Toggle a type filter; 'all' clears the entire set
+  const toggleFilter = useCallback((key: string) => {
+    if (key === 'all') {
+      setTypeFilters(new Set());
+      return;
+    }
+    setTypeFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Filter results — empty set means show everything
   const results = (searchQ.data ?? []).filter((r) => {
-    if (typeFilter === 'all') return true;
-    if (typeFilter === 'tables')   return r.type === 'DaliTable';
-    if (typeFilter === 'routines') return r.type === 'DaliRoutine' || r.type === 'DaliStatement' || r.type === 'DaliSession';
-    if (typeFilter === 'columns')  return r.type === 'DaliColumn' || r.type === 'DaliOutputColumn';
-    return true;
+    if (typeFilters.size === 0) return true;
+    if (typeFilters.has('tables')       && r.type === 'DaliTable') return true;
+    if (typeFilters.has('columns')      && (r.type === 'DaliColumn' || r.type === 'DaliOutputColumn')) return true;
+    if (typeFilters.has('routines')     && (r.type === 'DaliRoutine' || r.type === 'DaliPackage' || r.type === 'DaliSession' || r.type === 'DaliParameter' || r.type === 'DaliVariable')) return true;
+    if (typeFilters.has('statements')   && r.type === 'DaliStatement') return true;
+    if (typeFilters.has('databases')    && (r.type === 'DaliDatabase' || r.type === 'DaliSchema')) return true;
+    if (typeFilters.has('applications') && r.type === 'DaliApplication') return true;
+    return false;
   });
 
-  // Handle result click
+  // Handle result click — deterministic navigation regardless of current level
   const handleSelect = useCallback((result: SearchResult) => {
     const type = result.type as string;
     if (type === 'DaliTable') {
-      // Drill down to L3 column lineage for this table
-      drillDown(result.id, result.label, 'DaliTable');
-    } else if (type === 'DaliSchema' || type === 'DaliPackage') {
-      const scope = type === 'DaliSchema' ? `schema-${result.label}` : result.id;
-      drillDown(scope, result.label, type as never);
+      // L2: schema explore — same curated view as L1→double-click
+      jumpTo('L2', 'schema-' + result.scope, result.scope, 'DaliSchema');
+    } else if (type === 'DaliColumn') {
+      // L2: schema explore — parent schema (column renders inline in table card)
+      jumpTo('L2', 'schema-' + result.scope, result.scope, 'DaliSchema');
+    } else if (type === 'DaliOutputColumn') {
+      // L2: parent statement via exploreByRid (sibling output cols shown inline)
+      jumpTo('L2', result.id, result.label, 'DaliOutputColumn');
+    } else if (type === 'DaliSchema') {
+      // L1: overview, highlight schema node + auto-expand parent DB
+      jumpTo('L1', null, result.label);
+      selectNode(result.id);
+    } else if (type === 'DaliPackage') {
+      // L2: package explore — scope = package_name
+      jumpTo('L2', 'pkg-' + result.scope, result.scope, 'DaliPackage');
+    } else if (type === 'DaliRoutine') {
+      // L2: package explore — scope = package_name (from Cypher join)
+      jumpTo('L2', 'pkg-' + result.scope, result.scope, 'DaliPackage');
+    } else if (type === 'DaliSession') {
+      // L2: exploreByRid — session shows its routines and their connections
+      jumpTo('L2', result.id, result.label, 'DaliSession');
+    } else if (type === 'DaliStatement') {
+      // Root statement (scope = package_name) → L2 package view
+      // Sub-statement or session-based (scope = session_id) → L3 lineage
+      const isPackageScope = result.scope
+        && !result.scope.startsWith('session-')
+        && !result.scope.startsWith('#');
+      if (isPackageScope) {
+        jumpTo('L2', 'pkg-' + result.scope, result.scope, 'DaliPackage');
+      } else {
+        jumpTo('L3', result.id, result.label, 'DaliStatement');
+      }
+    } else if (type === 'DaliParameter' || type === 'DaliVariable') {
+      // L3: lineage for this parameter/variable
+      jumpTo('L3', result.id, result.label, type as never);
+    } else if (type === 'DaliDatabase' || type === 'DaliApplication') {
+      // L1: overview, highlight that node
+      jumpTo('L1', null, result.label);
+      selectNode(result.id);
     } else {
-      // Highlight / select on current canvas
       selectNode(result.id);
     }
-  }, [drillDown, selectNode]);
+  }, [jumpTo, selectNode]);
 
   const tabs: { key: string; label: string }[] = [
-    { key: 'all',      label: t('search.filters.all') },
-    { key: 'tables',   label: t('search.filters.tables') },
-    { key: 'routines', label: t('search.filters.routines') },
-    { key: 'columns',  label: t('search.filters.columns') },
+    { key: 'all',          label: t('search.filters.all') },
+    { key: 'tables',       label: t('search.filters.tables') },
+    { key: 'columns',      label: t('search.filters.columns') },
+    { key: 'routines',     label: t('search.filters.routines') },
+    { key: 'statements',   label: t('search.filters.statements') },
+    { key: 'databases',    label: t('search.filters.databases') },
+    { key: 'applications', label: t('search.filters.applications') },
   ];
+
+  const isAllActive = typeFilters.size === 0;
+
+  const scrollTabsRight = () => {
+    tabsRef.current?.scrollBy({ left: 80, behavior: 'smooth' });
+  };
 
   const hiddenIds = [...hiddenNodeIds];
   const showHiddenSection = hiddenIds.length > 0 && debouncedQuery.length < 2;
@@ -251,33 +333,68 @@ export const SearchPanel = memo(() => {
       </div>
 
       {/* ── Type filter tabs ──────────────────────────────────────────────────── */}
-      <div style={{
-        display:      'flex',
-        gap:          '2px',
-        padding:      '2px 4px',
-        flexShrink:   0,
-        overflowX:    'auto',
-      }}>
-        {tabs.map((tab) => (
+      <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, position: 'relative' }}>
+        <div
+          ref={tabsRef}
+          style={{
+            display:    'flex',
+            gap:        '2px',
+            padding:    '2px 4px',
+            flex:       1,
+            overflowX:  'auto',
+            scrollbarWidth: 'none',
+          }}
+        >
+          {tabs.map((tab) => {
+            const active = tab.key === 'all' ? isAllActive : typeFilters.has(tab.key);
+            return (
+              <button
+                key={tab.key}
+                onClick={() => toggleFilter(tab.key)}
+                style={{
+                  padding:      '2px 7px',
+                  borderRadius: '4px',
+                  border:       'none',
+                  cursor:       'pointer',
+                  fontSize:     '10px',
+                  fontWeight:   active ? 600 : 400,
+                  background:   active ? 'var(--acc)' : 'transparent',
+                  color:        active ? 'var(--bg1)' : 'var(--t3)',
+                  whiteSpace:   'nowrap',
+                  transition:   'background 0.1s, color 0.1s',
+                  flexShrink:   0,
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ">>" scroll arrow — appears when tabs overflow */}
+        {canScrollRight && (
           <button
-            key={tab.key}
-            onClick={() => setTypeFilter(tab.key)}
+            onClick={scrollTabsRight}
+            title="Ещё фильтры"
             style={{
-              padding:      '2px 7px',
-              borderRadius: '4px',
+              flexShrink:   0,
+              padding:      '2px 5px',
+              background:   'linear-gradient(to right, transparent, var(--bg2) 40%)',
               border:       'none',
               cursor:       'pointer',
               fontSize:     '10px',
-              fontWeight:   typeFilter === tab.key ? 600 : 400,
-              background:   typeFilter === tab.key ? 'var(--acc)' : 'transparent',
-              color:        typeFilter === tab.key ? 'var(--bg1)' : 'var(--t3)',
-              whiteSpace:   'nowrap',
-              transition:   'background 0.1s, color 0.1s',
+              color:        'var(--t3)',
+              position:     'absolute',
+              right:        0,
+              top:          0,
+              bottom:       0,
+              display:      'flex',
+              alignItems:   'center',
             }}
           >
-            {tab.label}
+            »
           </button>
-        ))}
+        )}
       </div>
 
       {/* ── Results / empty states ────────────────────────────────────────────── */}
