@@ -29,7 +29,7 @@ import { useLoomStore }                              from '../../stores/loomStor
 import { transformGqlOverview, transformGqlExplore } from '../../utils/transformGraph';
 import { applyELKLayout }                            from '../../utils/layoutGraph';
 import { applyL1Layout }                             from '../../utils/layoutL1';
-import { useOverview, useExplore, useLineage }       from '../../services/hooks';
+import { useOverview, useExplore, useLineage, useUpstream, useDownstream } from '../../services/hooks';
 import { isUnauthorized }                            from '../../services/lineage';
 import { SCOPE_FILTER_TYPES }                        from '../../utils/transformGraph';
 import type { LoomNode, LoomEdge }                   from '../../types/graph';
@@ -73,6 +73,12 @@ const LoomCanvasInner = memo(() => {
     setAvailableDbs,
     setAvailableSchemas,
     toggleDbExpansion,
+    // LOOM-027: expand
+    expandRequest,
+    expansionGqlNodes,
+    expansionGqlEdges,
+    addExpansionData,
+    clearExpandRequest,
   } = useLoomStore();
   const { t } = useTranslation();
 
@@ -90,13 +96,50 @@ const LoomCanvasInner = memo(() => {
                     : viewLevel === 'L2' ? exploreQ
                     : lineageQ;
 
+  // ── LOOM-027: upstream / downstream expand queries ────────────────────────
+  const upstreamExpandId   = expandRequest?.direction === 'upstream'   ? expandRequest.nodeId : null;
+  const downstreamExpandId = expandRequest?.direction === 'downstream' ? expandRequest.nodeId : null;
+  const { data: upstreamExpandData,   isSuccess: upstreamOk   } = useUpstream(upstreamExpandId);
+  const { data: downstreamExpandData, isSuccess: downstreamOk } = useDownstream(downstreamExpandId);
+
+  useEffect(() => {
+    if (upstreamOk && upstreamExpandData && upstreamExpandId) {
+      addExpansionData(upstreamExpandId, 'upstream', upstreamExpandData.nodes, upstreamExpandData.edges);
+      clearExpandRequest();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upstreamOk, upstreamExpandData, upstreamExpandId]);
+
+  useEffect(() => {
+    if (downstreamOk && downstreamExpandData && downstreamExpandId) {
+      addExpansionData(downstreamExpandId, 'downstream', downstreamExpandData.nodes, downstreamExpandData.edges);
+      clearExpandRequest();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downstreamOk, downstreamExpandData, downstreamExpandId]);
+
   // ── Transform raw GraphQL data → RF nodes / edges ───────────────────────
+  // After transform, merge any expansion data fetched via LOOM-027 expand buttons.
   const rawGraph = useMemo(() => {
-    if (viewLevel === 'L1' && overviewQ.data) return transformGqlOverview(overviewQ.data);
-    if (viewLevel === 'L2' && exploreQ.data)  return transformGqlExplore(exploreQ.data);
-    if (viewLevel === 'L3' && lineageQ.data)  return transformGqlExplore(lineageQ.data);
-    return null;
-  }, [viewLevel, overviewQ.data, exploreQ.data, lineageQ.data]);
+    let base: { nodes: LoomNode[]; edges: LoomEdge[] } | null = null;
+    if (viewLevel === 'L1' && overviewQ.data) base = transformGqlOverview(overviewQ.data);
+    else if (viewLevel === 'L2' && exploreQ.data)  base = transformGqlExplore(exploreQ.data);
+    else if (viewLevel === 'L3' && lineageQ.data)  base = transformGqlExplore(lineageQ.data);
+    if (!base) return null;
+
+    // LOOM-027: merge expansion nodes/edges (de-duplicated by id)
+    if (expansionGqlNodes.length > 0 || expansionGqlEdges.length > 0) {
+      const expansionGraph = transformGqlExplore({ nodes: expansionGqlNodes, edges: expansionGqlEdges });
+      const existingNodeIds = new Set(base.nodes.map((n) => n.id));
+      const existingEdgeIds = new Set(base.edges.map((e) => e.id));
+      return {
+        nodes: [...base.nodes, ...expansionGraph.nodes.filter((n) => !existingNodeIds.has(n.id))],
+        edges: [...base.edges, ...expansionGraph.edges.filter((e) => !existingEdgeIds.has(e.id))],
+      };
+    }
+
+    return base;
+  }, [viewLevel, overviewQ.data, exploreQ.data, lineageQ.data, expansionGqlNodes, expansionGqlEdges]);
 
   // ── Populate App/DB/Schema lists for L1 filter panel ──────────────────────
   useEffect(() => {

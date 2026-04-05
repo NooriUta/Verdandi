@@ -4,6 +4,7 @@ import { Table2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLoomStore } from '../../../stores/loomStore';
 import type { DaliNodeData, ColumnInfo } from '../../../types/domain';
+import { NodeExpandButtons } from './NodeExpandButtons';
 
 export type TableNodeType = Node<DaliNodeData>;
 
@@ -154,6 +155,7 @@ export const TableNode = memo(({ data, selected, id }: NodeProps<TableNodeType>)
       }}
       onClick={() => selectNode(id)}
     >
+      <NodeExpandButtons nodeId={id} show={selected ?? false} />
       <Handle type="target" position={Position.Left} style={{ background: 'var(--inf)', zIndex: 5 }} />
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}

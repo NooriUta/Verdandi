@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import type { BreadcrumbItem, DaliNodeType, ViewLevel } from '../types/domain';
 
+// ─── Expansion types (LOOM-027) ───────────────────────────────────────────────
+export interface ExpansionGqlNode {
+  id: string; type: string; label: string; scope: string;
+}
+export interface ExpansionGqlEdge {
+  id: string; source: string; target: string; type: string;
+}
+
 // ─── Filter Toolbar state (LOOM-023b) ────────────────────────────────────────
 export interface FilterState {
   /** NodeId of the "start object" shown in the pill */
@@ -136,6 +144,24 @@ interface LoomStore {
   restoreNode: (nodeId: string) => void;
   showAllNodes: () => void;
 
+  // ── Upstream / downstream expand (LOOM-027) ───────────────────────────────
+  /** Pending expand request — canvas watches and fires the query */
+  expandRequest: { nodeId: string; direction: 'upstream' | 'downstream' } | null;
+  expandedUpstreamIds: Set<string>;
+  expandedDownstreamIds: Set<string>;
+  /** Accumulated raw GQL nodes/edges from all expand operations */
+  expansionGqlNodes: ExpansionGqlNode[];
+  expansionGqlEdges: ExpansionGqlEdge[];
+  requestExpand: (nodeId: string, direction: 'upstream' | 'downstream') => void;
+  addExpansionData: (
+    nodeId: string,
+    direction: 'upstream' | 'downstream',
+    nodes: ExpansionGqlNode[],
+    edges: ExpansionGqlEdge[],
+  ) => void;
+  clearExpandRequest: () => void;
+  clearExpansion: () => void;
+
   // ── Filter toolbar actions (LOOM-023b) ────────────────────────────────────
   setStartObject: (nodeId: string, nodeType: DaliNodeType, label: string) => void;
   setFieldFilter: (columnName: string | null) => void;
@@ -176,6 +202,11 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
   availableFields: [],
   nodeExpansionState: {},
   hiddenNodeIds: new Set<string>(),
+  expandRequest: null,
+  expandedUpstreamIds: new Set<string>(),
+  expandedDownstreamIds: new Set<string>(),
+  expansionGqlNodes: [],
+  expansionGqlEdges: [],
   theme: (localStorage.getItem('seer-theme') as 'dark' | 'light') ?? 'dark',
   palette: localStorage.getItem('seer-palette') ?? 'amber-forest',
   nodeCount: 0,
@@ -191,21 +222,24 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       viewLevel: nextLevel,
       currentScope: nodeId,
       currentScopeLabel: label,
-      // L1 → L2: the root "Overview" button already represents L1, no stack push needed.
-      // L2 → L3: push the current L2 scope so the breadcrumb shows the intermediate step.
       navigationStack:
         viewLevel === 'L1'
           ? []
           : [...navigationStack, { level: viewLevel, scope: currentScope, label }],
       selectedNodeId: null,
       availableFields: [],
-      // Reset filter, but set new start object
       filter: {
         ...FILTER_DEFAULTS,
         startObjectId:    nodeId,
         startObjectType:  nodeType ?? null,
         startObjectLabel: label,
       },
+      // Clear expansion on navigation (LOOM-027)
+      expandRequest: null,
+      expandedUpstreamIds: new Set<string>(),
+      expandedDownstreamIds: new Set<string>(),
+      expansionGqlNodes: [],
+      expansionGqlEdges: [],
     });
   },
 
@@ -228,6 +262,11 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
         startObjectType:  nodeType ?? null,
         startObjectLabel: label,
       },
+      expandRequest: null,
+      expandedUpstreamIds: new Set<string>(),
+      expandedDownstreamIds: new Set<string>(),
+      expansionGqlNodes: [],
+      expansionGqlEdges: [],
     });
   },
 
@@ -249,6 +288,11 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
         startObjectId:    item.scope,
         startObjectLabel: item.label,
       },
+      expandRequest: null,
+      expandedUpstreamIds: new Set<string>(),
+      expandedDownstreamIds: new Set<string>(),
+      expansionGqlNodes: [],
+      expansionGqlEdges: [],
     });
   },
 
@@ -266,6 +310,11 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       selectedNodeId: null,
       availableFields: [],
       filter: { ...FILTER_DEFAULTS },
+      expandRequest: null,
+      expandedUpstreamIds: new Set<string>(),
+      expandedDownstreamIds: new Set<string>(),
+      expansionGqlNodes: [],
+      expansionGqlEdges: [],
     });
   },
 
@@ -430,4 +479,41 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
   toggleL1DirUp:       ()       => set((s) => ({ l1Filter: { ...s.l1Filter, dirUp: !s.l1Filter.dirUp } })),
   toggleL1DirDown:     ()       => set((s) => ({ l1Filter: { ...s.l1Filter, dirDown: !s.l1Filter.dirDown } })),
   toggleL1SystemLevel: ()       => set((s) => ({ l1Filter: { ...s.l1Filter, systemLevel: !s.l1Filter.systemLevel } })),
+
+  // ── Upstream / downstream expand actions (LOOM-027) ──────────────────────
+  requestExpand: (nodeId, direction) => {
+    set({ expandRequest: { nodeId, direction } });
+  },
+
+  addExpansionData: (nodeId, direction, nodes, edges) => {
+    set((s) => {
+      const nextUpIds   = new Set(s.expandedUpstreamIds);
+      const nextDownIds = new Set(s.expandedDownstreamIds);
+      if (direction === 'upstream')   nextUpIds.add(nodeId);
+      else                            nextDownIds.add(nodeId);
+
+      // De-duplicate by id
+      const existingNodeIds = new Set(s.expansionGqlNodes.map((n) => n.id));
+      const existingEdgeIds = new Set(s.expansionGqlEdges.map((e) => e.id));
+      const newNodes = nodes.filter((n) => !existingNodeIds.has(n.id));
+      const newEdges = edges.filter((e) => !existingEdgeIds.has(e.id));
+
+      return {
+        expandedUpstreamIds:   nextUpIds,
+        expandedDownstreamIds: nextDownIds,
+        expansionGqlNodes: [...s.expansionGqlNodes, ...newNodes],
+        expansionGqlEdges: [...s.expansionGqlEdges, ...newEdges],
+      };
+    });
+  },
+
+  clearExpandRequest: () => set({ expandRequest: null }),
+
+  clearExpansion: () => set({
+    expandRequest: null,
+    expandedUpstreamIds: new Set<string>(),
+    expandedDownstreamIds: new Set<string>(),
+    expansionGqlNodes: [],
+    expansionGqlEdges: [],
+  }),
 }));
