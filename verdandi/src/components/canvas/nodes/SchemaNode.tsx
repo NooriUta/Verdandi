@@ -4,6 +4,7 @@ import { FolderTree } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLoomStore } from '../../../stores/loomStore';
 import type { DaliNodeData } from '../../../types/domain';
+import { NodeExpandButtons } from './NodeExpandButtons';
 
 export type SchemaNodeType = Node<DaliNodeData>;
 
@@ -26,6 +27,7 @@ export const SchemaNode = memo(({ data, selected, id }: NodeProps<SchemaNodeType
         if (data.childrenAvailable) drillDown(id, data.label, data.nodeType);
       }}
     >
+      <NodeExpandButtons nodeId={id} show={selected ?? false} />
       <Handle type="target" position={Position.Left}  style={{ background: 'var(--bd)' }} />
 
       <div style={{ padding: 'var(--seer-space-3) var(--seer-space-3)' }}>

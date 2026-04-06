@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { Columns3, Zap } from 'lucide-react';
 import { useLoomStore } from '../../../stores/loomStore';
 import type { DaliNodeData } from '../../../types/domain';
+import { NodeExpandButtons } from './NodeExpandButtons';
 
 export type ColumnNodeType = Node<DaliNodeData>;
 
@@ -27,6 +28,7 @@ export const ColumnNode = memo(({ data, selected, id }: NodeProps<ColumnNodeType
       }}
       onClick={() => selectNode(id)}
     >
+      <NodeExpandButtons nodeId={id} show={selected ?? false} />
       <Handle type="target" position={Position.Left}  style={{ background: 'var(--inf)' }} />
 
       <div style={{ padding: 'var(--seer-space-2) var(--seer-space-3)' }}>
