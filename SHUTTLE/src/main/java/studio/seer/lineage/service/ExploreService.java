@@ -64,17 +64,21 @@ public class ExploreService {
         // column edges in one call — avoids LIMIT collisions with CONTAINS_STMT.
         //
         // $dbName filter: restricts to exact database to avoid cross-db schema name collisions.
+        // ArcadeDB: schema_name has a FULL_TEXT (Lucene) index which does NOT support equality
+        // lookup in Cypher/SQL. Use schema_geoid with the compound HASH index
+        // DaliSchema[db_name,schema_geoid] instead. schema_geoid == schema_name for all
+        // standard SQL databases (both store the schema identifier, e.g. "HR", "SYS").
         String cypher = """
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
             RETURN id(s) AS srcId, s.schema_name AS srcLabel, 'DaliSchema' AS srcType,
                    id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
                    'DaliTable' AS tgtType, 'CONTAINS_TABLE' AS edgeType
             LIMIT 300
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_ROUTINE]->(child)
             WHERE child:DaliPackage OR child:DaliRoutine
             RETURN id(s) AS srcId, s.schema_name AS srcLabel, 'DaliSchema' AS srcType,
@@ -83,8 +87,8 @@ public class ExploreService {
                    '' AS tgtScope, labels(child)[0] AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
             LIMIT 200
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_ROUTINE]->(r:DaliRoutine)-[:CONTAINS_STMT]->(stmt:DaliStatement)
             WHERE coalesce(stmt.parent_statement, '') = ''
             RETURN DISTINCT id(r) AS srcId, r.routine_name AS srcLabel, 'DaliRoutine' AS srcType,
@@ -92,16 +96,16 @@ public class ExploreService {
                    'DaliStatement' AS tgtType, 'CONTAINS_STMT' AS edgeType
             LIMIT 300
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_ROUTINE]->(pkg:DaliPackage)-[:CONTAINS_ROUTINE]->(r:DaliRoutine)
             RETURN DISTINCT id(pkg) AS srcId, pkg.package_name AS srcLabel, 'DaliPackage' AS srcType,
                    id(r) AS tgtId, r.routine_name AS tgtLabel, '' AS tgtScope,
                    'DaliRoutine' AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
             LIMIT 200
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_ROUTINE]->(:DaliPackage)-[:CONTAINS_ROUTINE]->(r:DaliRoutine)
                   -[:CONTAINS_STMT]->(stmt:DaliStatement)
             WHERE coalesce(stmt.parent_statement, '') = ''
@@ -110,8 +114,8 @@ public class ExploreService {
                    'DaliStatement' AS tgtType, 'CONTAINS_STMT' AS edgeType
             LIMIT 300
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)<-[:WRITES_TO]-(stmt:DaliStatement)
             WHERE coalesce(stmt.parent_statement, '') = ''
             RETURN DISTINCT id(stmt) AS srcId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
@@ -119,8 +123,8 @@ public class ExploreService {
                    'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
             LIMIT 200
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)<-[:READS_FROM]-(stmt:DaliStatement)
             WHERE coalesce(stmt.parent_statement, '') = ''
             RETURN DISTINCT id(stmt) AS srcId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
@@ -128,8 +132,8 @@ public class ExploreService {
                    'DaliTable' AS tgtType, 'READS_FROM' AS edgeType
             LIMIT 200
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
                   <-[:READS_FROM]-(:DaliStatement)-[:CHILD_OF*1..30]->(rootStmt:DaliStatement)
             WHERE coalesce(rootStmt.parent_statement, '') = ''
@@ -138,8 +142,8 @@ public class ExploreService {
                    'DaliTable' AS tgtType, 'READS_FROM' AS edgeType
             LIMIT 200
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
                   <-[:WRITES_TO]-(:DaliStatement)-[:CHILD_OF*1..30]->(rootStmt:DaliStatement)
             WHERE coalesce(rootStmt.parent_statement, '') = ''
@@ -148,8 +152,8 @@ public class ExploreService {
                    'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
             LIMIT 200
             UNION ALL
-            MATCH (s:DaliSchema {schema_name: $schema})
-            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s:DaliSchema)
+            WHERE s.schema_geoid = $schema AND ($dbName = '' OR s.db_name = $dbName)
             MATCH (s)-[:CONTAINS_TABLE]->(:DaliTable)<-[:READS_FROM]-(stmt:DaliStatement)
                   -[:WRITES_TO]->(target:DaliTable)
             WHERE coalesce(stmt.parent_statement, '') = ''
