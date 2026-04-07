@@ -195,6 +195,9 @@ const LoomCanvasInner = memo(() => {
   useEffect(() => {
     if (deepExpandOk && deepExpandData && deepExpandNodeId) {
       addExpansionData(deepExpandNodeId, 'upstream', deepExpandData.nodes, deepExpandData.edges);
+      // Re-focus the originating node after the second ELK layout that addExpansionData triggers.
+      // pendingFocusNodeId was already consumed by the first layout, so we re-request here.
+      requestFocusNode(deepExpandNodeId);
       clearDeepExpandRequest();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
