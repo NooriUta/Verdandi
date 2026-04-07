@@ -9,6 +9,7 @@ import {
   fetchSearch,
   fetchKnotSessions,
   fetchKnotReport,
+  fetchExpandDeep,
   isUnauthorized,
 } from './lineage';
 import { useAuthStore } from '../stores/authStore';
@@ -21,6 +22,7 @@ export const qk = {
   lineage:      (nodeId: string) => ['lineage', nodeId]        as const,
   upstream:     (nodeId: string) => ['upstream', nodeId]       as const,
   downstream:   (nodeId: string) => ['downstream', nodeId]     as const,
+  expandDeep:   (nodeId: string, depth: number) => ['expandDeep', nodeId, depth] as const,
   search:       (q: string)      => ['search', q]              as const,
   knotSessions: ()               => ['knotSessions']           as const,
   knotReport:   (sid: string)    => ['knotReport', sid]        as const,
@@ -89,6 +91,17 @@ export function useDownstream(nodeId: string | null) {
   return useQuery({
     queryKey: qk.downstream(nodeId ?? ''),
     queryFn:  () => fetchDownstream(nodeId!),
+    enabled:  !!nodeId,
+    throwOnError: false,
+    meta: { onError },
+  });
+}
+
+export function useExpandDeep(nodeId: string | null, depth: number) {
+  const onError = useOnUnauthorized();
+  return useQuery({
+    queryKey: qk.expandDeep(nodeId ?? '', depth),
+    queryFn:  () => fetchExpandDeep(nodeId!, depth),
     enabled:  !!nodeId,
     throwOnError: false,
     meta: { onError },

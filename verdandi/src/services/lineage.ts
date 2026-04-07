@@ -110,6 +110,15 @@ const DOWNSTREAM = /* GraphQL */ `
   }
 `;
 
+const EXPAND_DEEP = /* GraphQL */ `
+  query ExpandDeep($nodeId: String!, $depth: Int!) {
+    expandDeep(nodeId: $nodeId, depth: $depth) {
+      nodes { id type label scope }
+      edges { id source target type }
+    }
+  }
+`;
+
 const STMT_COLUMNS = /* GraphQL */ `
   query StmtColumns($ids: [String]!) {
     stmtColumns(ids: $ids) {
@@ -152,6 +161,11 @@ export async function fetchUpstream(nodeId: string): Promise<ExploreResult> {
 export async function fetchDownstream(nodeId: string): Promise<ExploreResult> {
   const data = await gqlClient.request<{ downstream: ExploreResult }>(DOWNSTREAM, { nodeId });
   return data.downstream;
+}
+
+export async function fetchExpandDeep(nodeId: string, depth: number): Promise<ExploreResult> {
+  const data = await gqlClient.request<{ expandDeep: ExploreResult }>(EXPAND_DEEP, { nodeId, depth });
+  return data.expandDeep;
 }
 
 export async function fetchStmtColumns(ids: string[]): Promise<ExploreResult> {

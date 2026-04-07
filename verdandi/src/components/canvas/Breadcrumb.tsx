@@ -8,6 +8,7 @@ export const Breadcrumb = memo(() => {
     navigationStack,
     viewLevel,
     currentScope,
+    currentScopeLabel,
     l1ScopeStack,
     navigateBack,
     navigateToLevel,
@@ -84,7 +85,7 @@ export const Breadcrumb = memo(() => {
         <>
           <ChevronRight size={11} color="var(--t3)" style={{ flexShrink: 0 }} />
           <BreadcrumbSegment
-            label={currentScopeLabel(viewLevel, currentScope)}
+            label={currentScopeLabel || scopeFallbackLabel(viewLevel, currentScope)}
             isCurrent
           />
         </>
@@ -97,10 +98,17 @@ Breadcrumb.displayName = 'Breadcrumb';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function currentScopeLabel(viewLevel: string, scope: string | null): string {
+/** Fallback label when store.currentScopeLabel is not set (e.g. jumpTo paths). */
+function scopeFallbackLabel(viewLevel: string, scope: string | null): string {
   if (!scope) return viewLevel;
-  const parts = scope.split('-');
-  return parts.slice(1).join('-') || scope;
+  // 'schema-ODS_BFR' → 'ODS_BFR', 'schema-ODS_BFR|ODS' → 'ODS_BFR'
+  const dash = scope.indexOf('-');
+  if (dash > 0) {
+    const nameRaw = scope.slice(dash + 1);
+    const pipe = nameRaw.indexOf('|');
+    return pipe >= 0 ? nameRaw.slice(0, pipe) : nameRaw;
+  }
+  return scope;
 }
 
 interface SegmentProps {

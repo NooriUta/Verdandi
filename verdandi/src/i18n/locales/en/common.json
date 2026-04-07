@@ -437,6 +437,18 @@
     "setAsStart": "Set as start object"
   },
 
+  "contextMenu": {
+    "drillDown": "Drill-down →",
+    "copyName": "Copy name"
+  },
+
+  "export": {
+    "title": "Export",
+    "json": "JSON",
+    "png": "PNG",
+    "svg": "SVG"
+  },
+
   "legend": {
     "title": "Legend",
     "open":  "Show legend",

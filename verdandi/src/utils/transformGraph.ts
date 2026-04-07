@@ -28,7 +28,7 @@ const NODE_TYPE_MAP: Record<DaliNodeType, string> = {
 // ─── Node types that support drilling down ───────────────────────────────────
 // Application/Service use scope filter (not level transition) on L1 (LOOM-024)
 const DRILLABLE_TYPES = new Set<DaliNodeType>([
-  'DaliDatabase', 'DaliSchema', 'DaliPackage', 'DaliTable',
+  'DaliDatabase', 'DaliSchema', 'DaliPackage', 'DaliTable', 'DaliStatement',
 ]);
 
 // Scope-filter on L1: double-click Application — сужает граф до её СУБД и схем
@@ -139,7 +139,23 @@ const SUPPRESSED_EDGES = new Set<string>([
   ...NESTING_EDGES,
   'CONTAINS_PACKAGE',                        // legacy — suppressed if present
   'CHILD_OF', 'USES_SUBQUERY', 'NESTED_IN', // sub-statement links
+  // Non-lineage structural edges — noise at both L2 and L3
+  'CALLS',              // routine/stmt calling another — internal detail
+  'ROUTINE_USES_TABLE', // shortcut edge, not direct lineage
+  'ATOM_REF_TABLE',     // atom-level reference — L3 internal
+  'ATOM_REF_COLUMN',    // atom-level reference — L3 internal
+  'ATOM_PRODUCES',      // atom → output col — superseded by HAS_OUTPUT_COL
+  'HAS_JOIN',           // join descriptor — rendered inline
+  'HAS_DATABASE',       // L1-level topology
+  'CONTAINS_SCHEMA',    // L1-level topology
+  'HAS_SERVICE',        // L1-level topology
+  'USES_DATABASE',      // L1-level topology
 ]);
+
+// ─── L2 edge whitelist: only data-flow arrows on the canvas ─────────────────
+// READS_FROM / WRITES_TO connect statements ↔ tables.
+// DATA_FLOW connects statement nodes when a direct flow is recorded.
+const L2_FLOW_EDGES = new Set<string>(['READS_FROM', 'WRITES_TO', 'DATA_FLOW']);
 
 /** Build parent → children[] map from edges matching the given type set. */
 function buildContainmentChildren(
@@ -190,9 +206,14 @@ const SQL_KEYWORDS = new Set([
 ]);
 
 function extractStatementType(label: string): string | undefined {
-  for (const part of label.split(/[\s:]+/)) {
-    const upper = part.toUpperCase();
-    if (SQL_KEYWORDS.has(upper)) return upper;
+  const parts = label.split(/[\s:]+/).map((p) => p.toUpperCase());
+  // SQ marks a subquery container — inner SELECT/INSERT is content, not the node type
+  if (parts.includes('SQ')) return 'SQ';
+  // Cursor variants normalised to single badge
+  if (parts.some((p) => p === 'CURSOR' || p === 'DINAMIC_CURSOR' || p === 'DYNAMIC_CURSOR')) return 'CURSOR';
+  // Root statements: first keyword = outermost operation type
+  for (const p of parts) {
+    if (SQL_KEYWORDS.has(p)) return p;
   }
   return undefined;
 }
@@ -279,13 +300,18 @@ function transformSchemaExplore(result: ExploreResult): {
   nodes: LoomNode[];
   edges: LoomEdge[];
 } {
-  const schemaNode = result.nodes.find((n) => n.type === 'DaliSchema')!;
-  const schemaId   = schemaNode.id;
-  const schemaName = schemaNode.label;
+  const allSchemaNodes = result.nodes.filter((n) => n.type === 'DaliSchema');
 
   const nestTree = buildContainmentChildren(result.edges, NESTING_EDGES);
   const nodeById = new Map(result.nodes.map((n) => [n.id, n]));
 
+  // Build table → schema name mapping (needed for multi-schema / DB-level explore)
+  const tableSchemaName = new Map<string, string>();
+  for (const e of result.edges) {
+    if (e.type !== 'CONTAINS_TABLE') continue;
+    const schemaN = nodeById.get(e.source);
+    if (schemaN?.type === 'DaliSchema') tableSchemaName.set(e.target, schemaN.label);
+  }
 
   // ── Collect columns: DaliColumn → table only (stmt columns arrive via applyStmtColumns) ────
   const columnsByParent = new Map<string, ColumnInfo[]>();
@@ -330,7 +356,7 @@ function transformSchemaExplore(result: ExploreResult): {
       }
     }
   }
-  walkTree(schemaId);
+  for (const sn of allSchemaNodes) walkTree(sn.id);
 
   // ── Phase 1b: Statements connected to tables via READS_FROM / WRITES_TO ──
   const DATA_FLOW_TYPES = new Set(['READS_FROM', 'WRITES_TO']);
@@ -348,6 +374,19 @@ function transformSchemaExplore(result: ExploreResult): {
   // Merge: all schema statements + connected external statements
   const allStmtIds = new Set([...schemaStmtIds, ...connectedStmtIds]);
 
+  // ── Phase 1c: Cross-schema WRITES_TO targets ─────────────────────────────
+  // Statements that read from this schema may write to tables in other schemas.
+  // Those external tables arrive via the backend's 9th UNION ALL branch.
+  // Collect them so they appear on canvas and WRITES_TO arrows are visible.
+  const externalWriteTableIds = new Set<string>();
+  for (const e of result.edges) {
+    if (e.type !== 'WRITES_TO') continue;
+    if (!allStmtIds.has(e.source)) continue;        // source must be a rendered statement
+    if (schemaTableIds.has(e.target)) continue;     // already captured as schema table
+    const nd = nodeById.get(e.target);
+    if (nd?.type === 'DaliTable') externalWriteTableIds.add(e.target);
+  }
+
   // ── Build flat React Flow nodes (no groups) ──────────────────────────────
   const rfNodes: LoomNode[] = [];
   const renderedIds = new Set<string>();
@@ -363,11 +402,31 @@ function transformSchemaExplore(result: ExploreResult): {
         nodeType:          'DaliTable' as DaliNodeType,
         childrenAvailable: true,
         metadata:          { scope: table.scope },
-        schema:            schemaName,
+        schema:            tableSchemaName.get(table.id) ?? '',
         columns:           columnsByParent.get(table.id),
       },
     });
     renderedIds.add(table.id);
+  }
+
+  // External write-target tables (cross-schema)
+  for (const extId of externalWriteTableIds) {
+    const nd = nodeById.get(extId);
+    if (!nd) continue;
+    rfNodes.push({
+      id:       extId,
+      type:     'tableNode',
+      position: { x: 0, y: 0 },
+      data: {
+        label:             nd.label,
+        nodeType:          'DaliTable' as DaliNodeType,
+        childrenAvailable: true,
+        metadata:          { scope: nd.scope },
+        schema:            tableSchemaName.get(extId) ?? nd.scope ?? '',
+        columns:           columnsByParent.get(extId),
+      },
+    });
+    renderedIds.add(extId);
   }
 
   // Statements
@@ -382,7 +441,7 @@ function transformSchemaExplore(result: ExploreResult): {
       data: {
         label:             shortLabel,
         nodeType:          'DaliStatement' as DaliNodeType,
-        childrenAvailable: false,
+        childrenAvailable: true,
         metadata:          { scope: nd.scope, groupPath, fullLabel: nd.label },
         operation:         extractStatementType(nd.label),
         columns:           columnsByParent.get(stmtId),
@@ -392,9 +451,10 @@ function transformSchemaExplore(result: ExploreResult): {
   }
 
   // ── Edges: data-flow between rendered nodes only ──────────────────────────
+  // Explicit whitelist: only READS_FROM / WRITES_TO / DATA_FLOW are arrows at L2.
   const rfEdges: LoomEdge[] = result.edges
     .filter((e) =>
-      !SUPPRESSED_EDGES.has(e.type) &&
+      L2_FLOW_EDGES.has(e.type) &&
       renderedIds.has(e.source) &&
       renderedIds.has(e.target),
     )
@@ -590,15 +650,12 @@ export function transformGqlExplore(result: ExploreResult): {
 
   const nodeIds = new Set(nodes.map((n) => n.id));
 
-  // HAS_COLUMN, HAS_OUTPUT_COL, HAS_AFFECTED_COL are implicit (inline); drop dangling edges.
-  // Subquery nodes were removed from nodeIds, so their outgoing/incoming edges
-  // (including USES_SUBQUERY, CHILD_OF, NESTED_IN, and their own READS_FROM)
-  // are automatically dropped by the nodeIds.has() guard below.
+  // SUPPRESSED_EDGES covers all containment, inline-column, sub-statement, and
+  // non-lineage structural edges. Subquery nodes were removed from nodeIds so
+  // their edges are dropped by the nodeIds guard automatically.
   const regularEdges: LoomEdge[] = result.edges
     .filter((e) =>
-      e.type !== 'HAS_OUTPUT_COL' &&
-      e.type !== 'HAS_AFFECTED_COL' &&
-      e.type !== 'HAS_COLUMN' &&
+      !SUPPRESSED_EDGES.has(e.type) &&
       nodeIds.has(e.source) &&
       nodeIds.has(e.target),
     )

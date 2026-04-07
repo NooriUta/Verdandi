@@ -131,4 +131,6 @@ export interface BreadcrumbItem {
   level: ViewLevel;
   scope: string | null;
   label: string;
+  /** React Flow node ID of the node that was drilled from (enables back-nav focus). */
+  fromNodeId?: string;
 }

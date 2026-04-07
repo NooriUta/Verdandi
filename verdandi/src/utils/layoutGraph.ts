@@ -80,6 +80,27 @@ const LAYERED_OPTIONS: Record<string, string> = {
   'elk.layered.unnecessaryBendpoints':         'true',
 };
 
+// ─── Fingerprint-based 1-entry layout cache ───────────────────────────────
+// Avoids re-running ELK when the same graph structure is requested again
+// (e.g. toggling a post-layout filter and back).
+interface LayoutCacheEntry {
+  fingerprint: string;
+  result: LoomNode[];
+}
+let layoutCache: LayoutCacheEntry | null = null;
+
+function graphFingerprint(nodes: LoomNode[], edges: LoomEdge[]): string {
+  // Include node ID + computed height so height changes (column count) invalidate cache.
+  const nodeKey = nodes.map((n) => `${n.id}:${getNodeHeight(n)}`).sort().join(',');
+  const edgeKey = edges.map((e) => e.id).sort().join(',');
+  return `${nodeKey}|${edgeKey}`;
+}
+
+/** Invalidate the layout cache — call on scope navigation to avoid stale positions. */
+export function clearLayoutCache(): void {
+  layoutCache = null;
+}
+
 // Singleton ELK instance (lazy-initialised)
 let elkInstance: ElkApi | null = null;
 
@@ -88,7 +109,7 @@ async function getElk(): Promise<ElkApi | null> {
   try {
     // elk.bundled.js = no web workers, runs in main thread
     const mod = await import('elkjs/lib/elk.bundled.js');
-    const ELK = mod.default as new () => ElkApi;
+    const ELK = (mod.default as unknown) as new () => ElkApi;
     elkInstance = new ELK();
     return elkInstance;
   } catch (err) {
@@ -111,6 +132,12 @@ export async function applyELKLayout(
 ): Promise<LoomNode[]> {
   if (nodes.length === 0) return nodes;
 
+  // Check 1-entry cache before hitting ELK
+  const fp = graphFingerprint(nodes, edges);
+  if (layoutCache && layoutCache.fingerprint === fp) {
+    return layoutCache.result;
+  }
+
   const elk = await getElk();
   if (!elk) return applyGridLayout(nodes);
 
@@ -132,10 +159,12 @@ export async function applyELKLayout(
     };
     try {
       const result = await elk.layout(graph);
-      return nodes.map((node) => {
-        const laid = result.children.find((c) => c.id === node.id);
-        return laid ? { ...node, position: { x: laid.x ?? 0, y: laid.y ?? 0 } } : node;
+      const laid = nodes.map((node) => {
+        const c = result.children.find((r) => r.id === node.id);
+        return c ? { ...node, position: { x: c.x ?? 0, y: c.y ?? 0 } } : node;
       });
+      layoutCache = { fingerprint: fp, result: laid };
+      return laid;
     } catch (err) {
       console.warn('[LOOM] ELK layout error, using grid layout fallback.', err);
       return applyGridLayout(nodes);
@@ -191,11 +220,13 @@ export async function applyELKLayout(
   try {
     const result = await elk.layout(graph);
     const posMap = new Map(result.children.map((c) => [c.id, { x: c.x ?? 0, y: c.y ?? 0 }]));
-    return nodes.map((node) => {
+    const laid = nodes.map((node) => {
       if (node.parentId) return node; // keep pre-computed relative positions
       const pos = posMap.get(node.id);
       return pos ? { ...node, position: pos } : node;
     });
+    layoutCache = { fingerprint: fp, result: laid };
+    return laid;
   } catch (err) {
     console.warn('[LOOM] ELK compound layout error.', err);
     // Grid-position top-level nodes; children keep pre-computed relative positions.

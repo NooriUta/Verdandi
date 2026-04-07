@@ -37,7 +37,12 @@ export const L1SchemaNode = memo(({ data, selected, id }: NodeProps<L1SchemaNode
         boxSizing:     'border-box' as const,
       }}
       onClick={(e) => { e.stopPropagation(); selectNode(id); }}
-      onDoubleClick={(e) => { e.stopPropagation(); drillDown(`schema-${data.label}`, data.label, 'DaliSchema'); }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        const dbName = data.metadata?.databaseName as string | null | undefined;
+        const scope = dbName ? `schema-${data.label}|${dbName}` : `schema-${data.label}`;
+        drillDown(scope, data.label, 'DaliSchema');
+      }}
     >
       {/* Colour dot */}
       <span style={{

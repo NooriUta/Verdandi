@@ -105,7 +105,18 @@ interface LoomStore {
   // ── Actions ───────────────────────────────────────────────────────────────
   drillDown: (nodeId: string, label: string, nodeType?: DaliNodeType) => void;
   /** Jump directly to a specific level + scope, regardless of current level (used by SearchPanel). */
-  jumpTo: (level: ViewLevel, scope: string | null, label: string, nodeType?: DaliNodeType) => void;
+  jumpTo: (
+    level: ViewLevel,
+    scope: string | null,
+    label: string,
+    nodeType?: DaliNodeType,
+    opts?: {
+      /** Focus this node after layout completes (center viewport). */
+      focusNodeId?: string;
+      /** Auto-expand lineage up to this many hops after layout. */
+      expandDepth?: number;
+    },
+  ) => void;
   navigateBack: (index: number) => void;
   navigateToLevel: (level: ViewLevel) => void;
   selectNode: (nodeId: string | null) => void;
@@ -197,6 +208,29 @@ interface LoomStore {
   requestFocusNode: (nodeId: string) => void;
   /** Consume (clear) the pending request after it has been executed */
   clearFitViewRequest: () => void;
+  /**
+   * Node to focus after the NEXT layout cycle completes (back-nav zoom).
+   * Set by navigateBack; consumed by LoomCanvas inside the layout effect's
+   * `.finally()` callback so it fires after ELK finishes — not immediately.
+   */
+  pendingFocusNodeId: string | null;
+  clearPendingFocus: () => void;
+
+  /**
+   * Deep-expand request deferred until after layout (search auto-expand).
+   * Set by jumpTo opts; consumed by LoomCanvas .finally() → becomes deepExpandRequest.
+   */
+  pendingDeepExpand: { nodeId: string; depth: number } | null;
+  clearPendingDeepExpand: () => void;
+  /** Promote pendingDeepExpand → deepExpandRequest (called by layout .finally()). */
+  activatePendingDeepExpand: () => void;
+
+  /**
+   * Active deep-expand query parameters (fired once layout has run).
+   * LoomCanvas watches this via useExpandDeep hook; clears on completion.
+   */
+  deepExpandRequest: { nodeId: string; depth: number } | null;
+  clearDeepExpandRequest: () => void;
 }
 
 const FILTER_DEFAULTS: FilterState = {
@@ -242,6 +276,9 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
   expansionGqlNodes: [],
   expansionGqlEdges: [],
   fitViewRequest: null,
+  pendingFocusNodeId: null,
+  pendingDeepExpand: null,
+  deepExpandRequest: null,
   theme: (localStorage.getItem('seer-theme') as 'dark' | 'light') ?? 'dark',
   palette: localStorage.getItem('seer-palette') ?? 'amber-forest',
   nodeCount: 0,
@@ -250,7 +287,7 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
 
   // ── drillDown: push current level onto stack, advance ────────────────────
   drillDown: (nodeId, label, nodeType) => {
-    const { viewLevel, currentScope, navigationStack } = get();
+    const { viewLevel, currentScope, currentScopeLabel, navigationStack } = get();
     const nextLevel: ViewLevel = viewLevel === 'L1' ? 'L2' : 'L3';
     set({
       viewLevel: nextLevel,
@@ -259,7 +296,7 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       navigationStack:
         viewLevel === 'L1'
           ? []
-          : [...navigationStack, { level: viewLevel, scope: currentScope, label }],
+          : [...navigationStack, { level: viewLevel, scope: currentScope, label: currentScopeLabel ?? currentScope ?? viewLevel, fromNodeId: nodeId }],
       selectedNodeId: null,
       availableFields: [],
       filter: {
@@ -278,7 +315,7 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
   },
 
   // ── jumpTo: direct navigation from search results (no level dependency) ───
-  jumpTo: (level, scope, label, nodeType) => {
+  jumpTo: (level, scope, label, nodeType, opts) => {
     set({
       viewLevel:          level,
       currentScope:       scope,
@@ -300,6 +337,12 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       expandedDownstreamIds: new Set<string>(),
       expansionGqlNodes: [],
       expansionGqlEdges: [],
+      // Post-layout focus + auto-expand (consumed by LoomCanvas .finally())
+      pendingFocusNodeId: opts?.focusNodeId ?? null,
+      pendingDeepExpand:  opts?.focusNodeId && opts?.expandDepth
+        ? { nodeId: opts.focusNodeId, depth: opts.expandDepth }
+        : null,
+      deepExpandRequest: null,
     });
   },
 
@@ -325,6 +368,10 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       expandedDownstreamIds: new Set<string>(),
       expansionGqlNodes: [],
       expansionGqlEdges: [],
+      // Queue focus for after the next ELK layout cycle (LoomCanvas consumes this
+      // inside the layout effect .finally() — avoids the race where fitViewRequest
+      // fires before the new graph has been laid out)
+      pendingFocusNodeId: item.fromNodeId ?? null,
     });
   },
 
@@ -587,4 +634,11 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
   requestFitView:     ()         => set({ fitViewRequest: { type: 'full' } }),
   requestFocusNode:   (nodeId)   => set({ fitViewRequest: { type: 'node', nodeId } }),
   clearFitViewRequest: ()        => set({ fitViewRequest: null }),
+  clearPendingFocus:  ()         => set({ pendingFocusNodeId: null }),
+  clearPendingDeepExpand:    ()  => set({ pendingDeepExpand: null }),
+  activatePendingDeepExpand: ()  => set(s => ({
+    deepExpandRequest: s.pendingDeepExpand,
+    pendingDeepExpand: null,
+  })),
+  clearDeepExpandRequest:    ()  => set({ deepExpandRequest: null }),
 }));
