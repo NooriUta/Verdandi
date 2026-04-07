@@ -750,7 +750,7 @@ const LoomCanvasInner = memo(() => {
 
   // ── Node interactions ───────────────────────────────────────────────────
   const onNodeClick = useCallback((_: React.MouseEvent, node: LoomNode) => {
-    selectNode(node.id);
+    selectNode(node.id, node.data);
 
     // Canvas → FilterToolbarL1 sync (L1 only).
     // Clicking a DB node highlights it in the DB cascade dropdown.
