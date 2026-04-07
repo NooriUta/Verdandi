@@ -437,6 +437,18 @@
     "setAsStart": "Установить как стартовый"
   },
 
+  "contextMenu": {
+    "drillDown": "Drill-down →",
+    "copyName": "Скопировать имя"
+  },
+
+  "export": {
+    "title": "Экспорт",
+    "json": "JSON",
+    "png": "PNG",
+    "svg": "SVG"
+  },
+
   "legend": {
     "title": "Легенда",
     "open":  "Показать легенду",
