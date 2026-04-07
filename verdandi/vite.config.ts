@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -16,6 +17,12 @@ export default defineConfig({
   optimizeDeps: {
     // Pre-bundle the browser-compatible ELK (CJS → ESM transform)
     include: ['elkjs/lib/elk.bundled.js'],
+  },
+  test: {
+    globals:     true,
+    environment: 'node',
+    include:     ['src/**/*.{test,spec}.{ts,tsx}'],
+    coverage:    { provider: 'v8', reporter: ['text', 'html'] },
   },
   server: {
     // Dev proxy: forward /graphql → SHUTTLE on 8080 (bypasses rbac-proxy which isn't running locally)
