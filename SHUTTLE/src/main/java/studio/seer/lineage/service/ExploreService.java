@@ -35,6 +35,7 @@ public class ExploreService {
         return switch (ref.type()) {
             case "schema" -> exploreSchema(ref.name(), ref.dbName());
             case "pkg"    -> explorePackage(ref.name());
+            case "db"     -> exploreByDatabase(ref.name());
             default       -> exploreByRid(ref.name());
         };
     }
@@ -130,11 +131,31 @@ public class ExploreService {
             MATCH (s:DaliSchema {schema_name: $schema})
             WHERE $dbName = '' OR s.db_name = $dbName
             MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
-                  <-[:READS_FROM]-(:DaliStatement)-[:CHILD_OF]->(rootStmt:DaliStatement)
+                  <-[:READS_FROM]-(:DaliStatement)-[:CHILD_OF*1..30]->(rootStmt:DaliStatement)
             WHERE coalesce(rootStmt.parent_statement, '') = ''
             RETURN DISTINCT id(rootStmt) AS srcId, coalesce(rootStmt.stmt_geoid, rootStmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
                    id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
                    'DaliTable' AS tgtType, 'READS_FROM' AS edgeType
+            LIMIT 200
+            UNION ALL
+            MATCH (s:DaliSchema {schema_name: $schema})
+            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
+                  <-[:WRITES_TO]-(:DaliStatement)-[:CHILD_OF*1..30]->(rootStmt:DaliStatement)
+            WHERE coalesce(rootStmt.parent_statement, '') = ''
+            RETURN DISTINCT id(rootStmt) AS srcId, coalesce(rootStmt.stmt_geoid, rootStmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
+            LIMIT 200
+            UNION ALL
+            MATCH (s:DaliSchema {schema_name: $schema})
+            WHERE $dbName = '' OR s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(:DaliTable)<-[:READS_FROM]-(stmt:DaliStatement)
+                  -[:WRITES_TO]->(target:DaliTable)
+            WHERE coalesce(stmt.parent_statement, '') = ''
+            RETURN DISTINCT id(stmt) AS srcId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(target) AS tgtId, target.table_name AS tgtLabel, target.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
             LIMIT 200
             """;
 
@@ -147,6 +168,97 @@ public class ExploreService {
 
         return arcade.cypher(cypher, params)
             .map(rows -> buildResult(rows, schemaName, "DaliSchema"));
+    }
+
+    // ── Database scope (all schemas in a DB) ─────────────────────────────────
+
+    /**
+     * Explores all schemas within a database.
+     * Equivalent to running exploreSchema for every DaliSchema where db_name = $dbName,
+     * but in a single set of queries. No LIMIT — the result can be large.
+     *
+     * The frontend transformSchemaExplore handles multi-schema results by walking
+     * all DaliSchema nodes found in the result.
+     */
+    private Uni<ExploreResult> exploreByDatabase(String dbName) {
+        String cypher = """
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
+            RETURN id(s) AS srcId, s.schema_name AS srcLabel, 'DaliSchema' AS srcType,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'CONTAINS_TABLE' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_ROUTINE]->(child)
+            WHERE child:DaliPackage OR child:DaliRoutine
+            RETURN id(s) AS srcId, s.schema_name AS srcLabel, 'DaliSchema' AS srcType,
+                   id(child) AS tgtId,
+                   coalesce(child.package_name, child.routine_name, '') AS tgtLabel,
+                   '' AS tgtScope, labels(child)[0] AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_ROUTINE]->(r:DaliRoutine)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            WHERE coalesce(stmt.parent_statement, '') = ''
+            RETURN DISTINCT id(r) AS srcId, r.routine_name AS srcLabel, 'DaliRoutine' AS srcType,
+                   id(stmt) AS tgtId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS tgtLabel, '' AS tgtScope,
+                   'DaliStatement' AS tgtType, 'CONTAINS_STMT' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_ROUTINE]->(pkg:DaliPackage)-[:CONTAINS_ROUTINE]->(r:DaliRoutine)
+            RETURN DISTINCT id(pkg) AS srcId, pkg.package_name AS srcLabel, 'DaliPackage' AS srcType,
+                   id(r) AS tgtId, r.routine_name AS tgtLabel, '' AS tgtScope,
+                   'DaliRoutine' AS tgtType, 'CONTAINS_ROUTINE' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_ROUTINE]->(:DaliPackage)-[:CONTAINS_ROUTINE]->(r:DaliRoutine)
+                  -[:CONTAINS_STMT]->(stmt:DaliStatement)
+            WHERE coalesce(stmt.parent_statement, '') = ''
+            RETURN DISTINCT id(r) AS srcId, r.routine_name AS srcLabel, 'DaliRoutine' AS srcType,
+                   id(stmt) AS tgtId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS tgtLabel, '' AS tgtScope,
+                   'DaliStatement' AS tgtType, 'CONTAINS_STMT' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)<-[:WRITES_TO]-(stmt:DaliStatement)
+            WHERE coalesce(stmt.parent_statement, '') = ''
+            RETURN DISTINCT id(stmt) AS srcId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)<-[:READS_FROM]-(stmt:DaliStatement)
+            WHERE coalesce(stmt.parent_statement, '') = ''
+            RETURN DISTINCT id(stmt) AS srcId, coalesce(stmt.stmt_geoid, stmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'READS_FROM' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
+                  <-[:READS_FROM]-(:DaliStatement)-[:CHILD_OF*1..30]->(rootStmt:DaliStatement)
+            WHERE coalesce(rootStmt.parent_statement, '') = ''
+            RETURN DISTINCT id(rootStmt) AS srcId, coalesce(rootStmt.stmt_geoid, rootStmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'READS_FROM' AS edgeType
+            UNION ALL
+            MATCH (s:DaliSchema)
+            WHERE s.db_name = $dbName
+            MATCH (s)-[:CONTAINS_TABLE]->(t:DaliTable)
+                  <-[:WRITES_TO]-(:DaliStatement)-[:CHILD_OF*1..30]->(rootStmt:DaliStatement)
+            WHERE coalesce(rootStmt.parent_statement, '') = ''
+            RETURN DISTINCT id(rootStmt) AS srcId, coalesce(rootStmt.stmt_geoid, rootStmt.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(t) AS tgtId, t.table_name AS tgtLabel, t.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
+            """;
+
+        return arcade.cypher(cypher, Map.of("dbName", dbName))
+            .map(rows -> buildResult(rows, dbName, "DaliDatabase"));
     }
 
     // ── Statement columns (second-pass enrichment) ───────────────────────────
@@ -278,6 +390,7 @@ public class ExploreService {
         String outQ = """
             MATCH (n)-[r]->(m)
             WHERE id(n) = $rid
+              AND (NOT m:DaliStatement OR coalesce(m.parent_statement, '') = '')
             RETURN id(n) AS srcId,
                    coalesce(n.schema_name, n.table_name, n.package_name, n.routine_name, n.stmt_geoid, n.column_name, n.name, n.col_key, '') AS srcLabel,
                    labels(n)[0] AS srcType,
@@ -290,6 +403,7 @@ public class ExploreService {
         String inQ = """
             MATCH (m)-[r]->(n)
             WHERE id(n) = $rid
+              AND (NOT m:DaliStatement OR coalesce(m.parent_statement, '') = '')
             RETURN id(m) AS srcId,
                    coalesce(m.schema_name, m.table_name, m.package_name, m.routine_name, m.stmt_geoid, m.column_name, m.name, m.col_key, '') AS srcLabel,
                    labels(m)[0] AS srcType,
@@ -345,6 +459,37 @@ public class ExploreService {
             LIMIT 100
             """;
 
+        // Hoist sub-statement READS_FROM to root INSERT via CHILD_OF*1..30
+        // Covers: INSERT reads table through nested subquery (not direct READS_FROM on root)
+        String hoistReadsQ = """
+            MATCH (sub:DaliStatement)-[:READS_FROM]->(n)
+            WHERE id(n) = $rid
+              AND coalesce(sub.parent_statement, '') <> ''
+            MATCH (sub)-[:CHILD_OF*1..30]->(root:DaliStatement)
+            WHERE coalesce(root.parent_statement, '') = ''
+            RETURN DISTINCT id(root) AS srcId,
+                   coalesce(root.stmt_geoid, root.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(n) AS tgtId,
+                   coalesce(n.table_name, '') AS tgtLabel, n.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'READS_FROM' AS edgeType
+            LIMIT 200
+            """;
+
+        // Hoist sub-statement WRITES_TO to root INSERT via CHILD_OF*1..30
+        String hoistWritesQ = """
+            MATCH (sub:DaliStatement)-[:WRITES_TO]->(n)
+            WHERE id(n) = $rid
+              AND coalesce(sub.parent_statement, '') <> ''
+            MATCH (sub)-[:CHILD_OF*1..30]->(root:DaliStatement)
+            WHERE coalesce(root.parent_statement, '') = ''
+            RETURN DISTINCT id(root) AS srcId,
+                   coalesce(root.stmt_geoid, root.snippet, '') AS srcLabel, 'DaliStatement' AS srcType,
+                   id(n) AS tgtId,
+                   coalesce(n.table_name, '') AS tgtLabel, n.schema_geoid AS tgtScope,
+                   'DaliTable' AS tgtType, 'WRITES_TO' AS edgeType
+            LIMIT 200
+            """;
+
         return Uni.combine().all()
             .unis(List.of(
                 arcade.cypher(outQ, params),
@@ -352,7 +497,9 @@ public class ExploreService {
                 arcade.cypher(outColQ, params),
                 arcade.cypher(sibColQ, params),
                 arcade.cypher(sibOutColQ, params),
-                arcade.cypher(stmtOutColQ, params)
+                arcade.cypher(stmtOutColQ, params),
+                arcade.cypher(hoistReadsQ, params),
+                arcade.cypher(hoistWritesQ, params)
             ))
             .combinedWith(results -> {
                 var all = new ArrayList<Map<String, Object>>();

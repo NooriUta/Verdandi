@@ -83,6 +83,15 @@ public class LineageResource {
         return lineageService.downstream(nodeId);
     }
 
+    @Query("expandDeep")
+    @Description("L2/L3 — multi-hop lineage (READS_FROM/WRITES_TO) up to `depth` hops both ways. Role: viewer+")
+    public Uni<ExploreResult> expandDeep(
+        @Name("nodeId") String nodeId,
+        @Name("depth")  @DefaultValue("5") int depth
+    ) {
+        return lineageService.expandDeep(nodeId, depth);
+    }
+
     // ── Search ────────────────────────────────────────────────────────────────
 
     @Query("search")

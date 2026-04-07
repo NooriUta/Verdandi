@@ -35,7 +35,7 @@ import { useLoomStore }                              from '../../stores/loomStor
 import { transformGqlOverview, transformGqlExplore, applyStmtColumns } from '../../utils/transformGraph';
 import { applyELKLayout, clearLayoutCache }          from '../../utils/layoutGraph';
 import { applyL1Layout }                             from '../../utils/layoutL1';
-import { useOverview, useExplore, useLineage, useUpstream, useDownstream, useStmtColumns } from '../../services/hooks';
+import { useOverview, useExplore, useLineage, useUpstream, useDownstream, useStmtColumns, useExpandDeep } from '../../services/hooks';
 import { isUnauthorized }                            from '../../services/lineage';
 import { SCOPE_FILTER_TYPES }                        from '../../utils/transformGraph';
 import type { LoomNode, LoomEdge }                   from '../../types/graph';
@@ -92,6 +92,13 @@ const LoomCanvasInner = memo(() => {
     // Viewport focus
     fitViewRequest,
     clearFitViewRequest,
+    pendingFocusNodeId,
+    requestFocusNode,
+    clearPendingFocus,
+    pendingDeepExpand,
+    activatePendingDeepExpand,
+    deepExpandRequest,
+    clearDeepExpandRequest,
     // Canvas → FilterToolbarL1 sync
     setL1HierarchyDb,
     setL1HierarchySchema,
@@ -129,11 +136,20 @@ const LoomCanvasInner = memo(() => {
   // Send both DaliTable and DaliStatement IDs — backend handles HAS_COLUMN,
   // HAS_OUTPUT_COL, HAS_AFFECTED_COL in one query based on node type matching.
   const stmtIds = useMemo(() => {
-    if (viewLevel !== 'L2' || !exploreQ.data) return [] as string[];
-    return exploreQ.data.nodes
-      .filter((n) => n.type === 'DaliStatement' || n.type === 'DaliTable')
-      .map((n) => n.id);
-  }, [viewLevel, exploreQ.data]);
+    if (viewLevel !== 'L2') return [] as string[];
+    const ENRICHABLE = new Set(['DaliStatement', 'DaliTable']);
+    const ids = new Set<string>();
+    if (exploreQ.data) {
+      for (const n of exploreQ.data.nodes) {
+        if (ENRICHABLE.has(n.type)) ids.add(n.id);
+      }
+    }
+    // Include expanded nodes (upstream/downstream/deepExpand) so their columns are fetched too
+    for (const n of expansionGqlNodes) {
+      if (ENRICHABLE.has(n.type)) ids.add(n.id);
+    }
+    return [...ids];
+  }, [viewLevel, exploreQ.data, expansionGqlNodes]);
 
   const stmtColsQ = useStmtColumns(stmtIds);
 
@@ -170,6 +186,25 @@ const LoomCanvasInner = memo(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [downstreamExpandError, downstreamExpandId]);
 
+  // ── Deep expand (search auto-expand: multi-hop READS_FROM/WRITES_TO) ────────
+  const deepExpandNodeId = deepExpandRequest?.nodeId ?? null;
+  const deepExpandDepth  = deepExpandRequest?.depth  ?? 5;
+  const { data: deepExpandData, isSuccess: deepExpandOk, isError: deepExpandError } =
+    useExpandDeep(deepExpandNodeId, deepExpandDepth);
+
+  useEffect(() => {
+    if (deepExpandOk && deepExpandData && deepExpandNodeId) {
+      addExpansionData(deepExpandNodeId, 'upstream', deepExpandData.nodes, deepExpandData.edges);
+      clearDeepExpandRequest();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepExpandOk, deepExpandData, deepExpandNodeId]);
+
+  useEffect(() => {
+    if (deepExpandError && deepExpandNodeId) clearDeepExpandRequest();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepExpandError, deepExpandNodeId]);
+
   // ── Transform raw GraphQL data → RF nodes / edges ───────────────────────
   // After transform, merge any expansion data fetched via LOOM-027 expand buttons.
   // stmtColsQ.data is applied here so ELK re-layouts with correct node heights.
@@ -185,9 +220,18 @@ const LoomCanvasInner = memo(() => {
       const expansionGraph = transformGqlExplore({ nodes: expansionGqlNodes, edges: expansionGqlEdges });
       const existingNodeIds = new Set(base.nodes.map((n) => n.id));
       const existingEdgeIds = new Set(base.edges.map((e) => e.id));
+      // L2: only allow table/statement nodes from expansion — suppress routines, packages, etc.
+      const L2_ALLOWED = new Set(['tableNode', 'statementNode']);
+      const allowedExpNodes = viewLevel === 'L2'
+        ? expansionGraph.nodes.filter((n) => L2_ALLOWED.has(n.type))
+        : expansionGraph.nodes;
+      const allowedExpIds = new Set(allowedExpNodes.map((n) => n.id));
+      const allowedExpEdges = viewLevel === 'L2'
+        ? expansionGraph.edges.filter((e) => allowedExpIds.has(e.source) && allowedExpIds.has(e.target))
+        : expansionGraph.edges;
       base = {
-        nodes: [...base.nodes, ...expansionGraph.nodes.filter((n) => !existingNodeIds.has(n.id))],
-        edges: [...base.edges, ...expansionGraph.edges.filter((e) => !existingEdgeIds.has(e.id))],
+        nodes: [...base.nodes, ...allowedExpNodes.filter((n) => !existingNodeIds.has(n.id))],
+        edges: [...base.edges, ...allowedExpEdges.filter((e) => !existingEdgeIds.has(e.id))],
       };
     }
 
@@ -571,7 +615,19 @@ const LoomCanvasInner = memo(() => {
         if (!cancelled) setLayoutError(true);
       })
       .finally(() => {
-        if (!cancelled) setLayouting(false);
+        if (!cancelled) {
+          setLayouting(false);
+          // Back-nav zoom / search focus: fire AFTER layout so fitViewRequest
+          // doesn't race against an empty/stale graph
+          if (pendingFocusNodeId) {
+            requestFocusNode(pendingFocusNodeId);
+            clearPendingFocus();
+          }
+          // Search auto-expand: promote pending → active request now that graph exists
+          if (pendingDeepExpand) {
+            activatePendingDeepExpand();
+          }
+        }
       });
 
     return () => { cancelled = true; };
@@ -731,6 +787,8 @@ const LoomCanvasInner = memo(() => {
       scope = dbName ? `schema-${node.data.label}|${dbName}` : `schema-${node.data.label}`;
     } else if (node.data.nodeType === 'DaliPackage') {
       scope = `pkg-${node.data.label}`;
+    } else if (node.data.nodeType === 'DaliDatabase') {
+      scope = `db-${node.data.label}`;
     } else {
       scope = node.id;
     }

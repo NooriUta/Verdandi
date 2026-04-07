@@ -228,11 +228,15 @@ export const SearchPanel = memo(() => {
   const handleSelect = useCallback((result: SearchResult) => {
     const type = result.type as string;
     if (type === 'DaliTable') {
-      // L2: schema explore — same curated view as L1→double-click
-      jumpTo('L2', 'schema-' + result.scope, result.scope, 'DaliSchema');
+      // L2: table-centric explore — show just this table + 5-hop lineage expand.
+      // Use the table's own RID as scope (→ exploreByRid) so the full schema is NOT loaded.
+      jumpTo('L2', result.id, result.label, 'DaliTable',
+        { focusNodeId: result.id, expandDepth: 5 });
     } else if (type === 'DaliColumn') {
-      // L2: schema explore — parent schema (column renders inline in table card)
-      jumpTo('L2', 'schema-' + result.scope, result.scope, 'DaliSchema');
+      // L2: column-centric explore — exploreByRid resolves the parent table + all
+      // sibling columns inline. The column renders inside the table card, not as a
+      // standalone node, so no focusNodeId needed here.
+      jumpTo('L2', result.id, result.label, 'DaliColumn');
     } else if (type === 'DaliOutputColumn') {
       // L2: parent statement via exploreByRid (sibling output cols shown inline)
       jumpTo('L2', result.id, result.label, 'DaliOutputColumn');

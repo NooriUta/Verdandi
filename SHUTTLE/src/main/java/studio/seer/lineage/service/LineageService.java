@@ -37,6 +37,7 @@ public class LineageService {
         String outQ = """
             MATCH (n)-[r]->(m)
             WHERE id(n) = $nodeId
+              AND (NOT m:DaliStatement OR coalesce(m.parent_statement, '') = '')
             RETURN id(n) AS srcId, labels(n)[0] AS srcType,
                    coalesce(n.table_name, n.column_name, n.routine_name,
                             n.package_name, n.stmt_geoid, n.app_name, n.schema_name, '') AS srcLabel,
@@ -51,6 +52,7 @@ public class LineageService {
         String inQ = """
             MATCH (m)-[r]->(n)
             WHERE id(n) = $nodeId
+              AND (NOT m:DaliStatement OR coalesce(m.parent_statement, '') = '')
             RETURN id(m) AS srcId, labels(m)[0] AS srcType,
                    coalesce(m.table_name, m.column_name, m.routine_name,
                             m.package_name, m.stmt_geoid, m.app_name, m.schema_name, '') AS srcLabel,
@@ -71,12 +73,13 @@ public class LineageService {
             });
     }
 
-    /** Upstream only — what feeds into nodeId (incoming edges). */
+    /** Upstream only — what feeds into nodeId (incoming edges). Root statements only. */
     public Uni<ExploreResult> upstream(String nodeId) {
         // Use swapped variable so id(n) refers to the node we found, not the pattern destination
         String cypher = """
             MATCH (m)-[r]->(n)
             WHERE id(n) = $nodeId
+              AND (NOT m:DaliStatement OR coalesce(m.parent_statement, '') = '')
             RETURN id(m) AS srcId, labels(m)[0] AS srcType,
                    coalesce(m.table_name, m.column_name, m.routine_name,
                             m.package_name, m.stmt_geoid, m.app_name, m.schema_name, '') AS srcLabel,
@@ -90,11 +93,12 @@ public class LineageService {
                 .map(rows -> ExploreService.buildResult(rows, nodeId, ""));
     }
 
-    /** Downstream only — what nodeId feeds into (outgoing edges). */
+    /** Downstream only — what nodeId feeds into (outgoing edges). Root statements only. */
     public Uni<ExploreResult> downstream(String nodeId) {
         String cypher = """
             MATCH (n)-[r]->(m)
             WHERE id(n) = $nodeId
+              AND (NOT m:DaliStatement OR coalesce(m.parent_statement, '') = '')
             RETURN id(n) AS srcId, labels(n)[0] AS srcType,
                    coalesce(n.table_name, n.column_name, n.routine_name,
                             n.package_name, n.stmt_geoid, n.app_name, n.schema_name, '') AS srcLabel,
@@ -104,6 +108,38 @@ public class LineageService {
                    m.schema_geoid AS tgtScope, type(r) AS edgeType
             LIMIT 200
             """;
+        return arcade.cypher(cypher, Map.of("nodeId", nodeId))
+                .map(rows -> ExploreService.buildResult(rows, nodeId, ""));
+    }
+
+    /**
+     * Multi-hop bidirectional lineage — follows READS_FROM / WRITES_TO edges
+     * up to {@code depth} hops from the starting node in both directions.
+     *
+     * Returns all distinct edges found along those paths so the frontend can
+     * merge them into the existing L2 graph without rerunning ELK from scratch.
+     * Depth is capped at 10 to prevent runaway traversals.
+     */
+    public Uni<ExploreResult> expandDeep(String nodeId, int depth) {
+        int d = Math.max(1, Math.min(depth, 10));
+        // ArcadeDB Cypher does not support $param inside *min..max, so we interpolate
+        // the (validated, integer-only) depth directly into the query string.
+        String cypher =
+            "MATCH path = (start)-[:READS_FROM|WRITES_TO*1.." + d + "]-(end)\n" +
+            "WHERE id(start) = $nodeId\n" +
+            "  AND id(end) <> id(start)\n" +
+            "  AND all(n IN nodes(path) WHERE n:DaliTable OR (n:DaliStatement AND coalesce(n.parent_statement, '') = ''))\n" +
+            "UNWIND relationships(path) AS rel\n" +
+            "WITH DISTINCT startNode(rel) AS s, endNode(rel) AS t, type(rel) AS et\n" +
+            "RETURN id(s) AS srcId,\n" +
+            "       coalesce(s.schema_name, s.table_name, s.stmt_geoid, s.snippet, '') AS srcLabel,\n" +
+            "       labels(s)[0] AS srcType,\n" +
+            "       id(t) AS tgtId,\n" +
+            "       coalesce(t.schema_name, t.table_name, t.stmt_geoid, t.snippet, '') AS tgtLabel,\n" +
+            "       coalesce(t.schema_geoid, '') AS tgtScope,\n" +
+            "       labels(t)[0] AS tgtType,\n" +
+            "       et AS edgeType\n" +
+            "LIMIT 500";
         return arcade.cypher(cypher, Map.of("nodeId", nodeId))
                 .map(rows -> ExploreService.buildResult(rows, nodeId, ""));
     }

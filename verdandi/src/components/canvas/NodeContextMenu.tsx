@@ -168,6 +168,8 @@ export const NodeContextMenu = memo(({ menu, onClose }: Props) => {
               scope = dbName ? `schema-${data.label}|${dbName}` : `schema-${data.label}`;
             } else if (data.nodeType === 'DaliPackage') {
               scope = `pkg-${data.label}`;
+            } else if (data.nodeType === 'DaliDatabase') {
+              scope = `db-${data.label}`;
             } else {
               scope = nodeId;
             }
