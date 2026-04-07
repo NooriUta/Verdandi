@@ -158,7 +158,21 @@ export const NodeContextMenu = memo(({ menu, onClose }: Props) => {
         <Item
           icon="⇲"
           label={t('contextMenu.drillDown')}
-          onClick={run(() => drillDown(nodeId, data.label, data.nodeType))}
+          onClick={run(() => {
+            // Mirror scope-building logic from LoomCanvas.onNodeDoubleClick so that
+            // schema/package nodes route to the correct exploreSchema / explorePackage
+            // handler on SHUTTLE instead of the generic exploreByRid fallback.
+            let scope: string;
+            if (data.nodeType === 'DaliSchema') {
+              const dbName = data.metadata?.databaseName as string | null | undefined;
+              scope = dbName ? `schema-${data.label}|${dbName}` : `schema-${data.label}`;
+            } else if (data.nodeType === 'DaliPackage') {
+              scope = `pkg-${data.label}`;
+            } else {
+              scope = nodeId;
+            }
+            drillDown(scope, data.label, data.nodeType);
+          })}
         />
       )}
       {isL2orL3 && (

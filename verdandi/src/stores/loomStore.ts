@@ -250,7 +250,7 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
 
   // ── drillDown: push current level onto stack, advance ────────────────────
   drillDown: (nodeId, label, nodeType) => {
-    const { viewLevel, currentScope, navigationStack } = get();
+    const { viewLevel, currentScope, currentScopeLabel, navigationStack } = get();
     const nextLevel: ViewLevel = viewLevel === 'L1' ? 'L2' : 'L3';
     set({
       viewLevel: nextLevel,
@@ -259,7 +259,7 @@ export const useLoomStore = create<LoomStore>((set, get) => ({
       navigationStack:
         viewLevel === 'L1'
           ? []
-          : [...navigationStack, { level: viewLevel, scope: currentScope, label }],
+          : [...navigationStack, { level: viewLevel, scope: currentScope, label: currentScopeLabel ?? currentScope ?? viewLevel }],
       selectedNodeId: null,
       availableFields: [],
       filter: {
