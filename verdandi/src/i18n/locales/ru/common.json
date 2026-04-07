@@ -24,7 +24,8 @@
     "edges": "рёбер",
     "level": "Уровень",
     "zoom": "Масштаб",
-    "computingLayout": "вычисляется граф…"
+    "computingLayout": "вычисляется граф…",
+    "nodeCount": "{{count}} узлов"
   },
   "breadcrumb": { "overview": "Обзор" },
   "theme": { "dark": "Тёмная", "light": "Светлая" },

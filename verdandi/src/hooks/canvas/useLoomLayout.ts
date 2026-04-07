@@ -28,6 +28,7 @@ export function useLoomLayout(
   displayGraph: Graph | null,
   setNodes: SetNodes,
   setEdges: SetEdges,
+  stmtColsReady: boolean,
 ) {
   const { fitView, getEdges, getNodes } = useReactFlow();
 
@@ -51,6 +52,9 @@ export function useLoomLayout(
   // ── Layout: L1 = pre-computed + applyL1Layout; L2/L3 = ELK ─────────────────
   useEffect(() => {
     if (!displayGraph) return;
+    // Wait until stmtColsQ has settled so cfEdges exist and node heights are
+    // final — this prevents a double ELK run on L2 graphs with column data.
+    if (!stmtColsReady) return;
     let cancelled = false;
 
     // L1 grouped layout: positions set by transformGqlOverview, dynamically
@@ -117,7 +121,7 @@ export function useLoomLayout(
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayGraph, viewLevel, expandedDbs, l1Filter.depth, l1Filter.systemLevel]);
+  }, [displayGraph, viewLevel, expandedDbs, l1Filter.depth, l1Filter.systemLevel, stmtColsReady]);
 
   // ── Post-layout dimming — tableFilter, stmtFilter + fieldFilter (LOOM-031) ───
   // These phases are intentionally absent from displayGraph to avoid ELK re-runs.

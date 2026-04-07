@@ -24,7 +24,8 @@
     "edges": "edges",
     "level": "Level",
     "zoom": "Zoom",
-    "computingLayout": "computing layout…"
+    "computingLayout": "computing layout…",
+    "nodeCount": "{{count}} nodes"
   },
   "breadcrumb": { "overview": "Overview" },
   "theme": { "dark": "Dark", "light": "Light" },

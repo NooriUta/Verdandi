@@ -83,5 +83,12 @@ export function useGraphData() {
     return base;
   }, [viewLevel, overviewQ.data, exploreQ.data, lineageQ.data, expansionGqlNodes, expansionGqlEdges, stmtColsQ.data]);
 
-  return { rawGraph, activeQuery };
+  // True once we have all the data ELK needs: column enrichment must settle
+  // before layout so cfEdges exist and node heights are final (single ELK run).
+  const stmtColsReady =
+    viewLevel !== 'L2' ||
+    stmtIds.length === 0 ||
+    (!stmtColsQ.isLoading && !stmtColsQ.isFetching);
+
+  return { rawGraph, activeQuery, stmtColsReady };
 }

@@ -81,11 +81,11 @@ const LoomCanvasInner = memo(() => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
-  const { rawGraph, activeQuery } = useGraphData();
+  const { rawGraph, activeQuery, stmtColsReady } = useGraphData();
   useExpansion();
-  const { displayGraph }          = useDisplayGraph(rawGraph);
-  const { layouting, layoutError } = useLoomLayout(displayGraph, setNodes, setEdges);
-  const { onMoveEnd }             = useFitView(layouting);
+  const { displayGraph }           = useDisplayGraph(rawGraph);
+  const { layouting, layoutError } = useLoomLayout(displayGraph, setNodes, setEdges, stmtColsReady);
+  const { onMoveEnd }              = useFitView(layouting);
   useFilterSync(rawGraph);
 
   // ── Close context menu on level change; clear ELK cache on scope change ──────
@@ -104,7 +104,13 @@ const LoomCanvasInner = memo(() => {
     return null;
   })();
 
-  const isLoading = activeQuery.isLoading || layouting;
+  // Show loading while: primary query fetches, column enrichment settles, or ELK runs.
+  // The stmtColsReady guard prevents a blank canvas between data arrival and ELK start.
+  const isLoading = activeQuery.isLoading || !stmtColsReady || layouting;
+
+  // Rough node count estimate for the large-graph loading hint (visible nodes in display graph).
+  const pendingNodeCount = displayGraph?.nodes.filter((n) => !n.hidden).length ?? 0;
+  const isLargeGraph = pendingNodeCount > 100;
 
   // ── Node interactions ────────────────────────────────────────────────────────
   const onNodeClick = useCallback((_: React.MouseEvent, node: LoomNode) => {
@@ -185,11 +191,19 @@ const LoomCanvasInner = memo(() => {
           background: 'color-mix(in srgb, var(--bg0) 85%, transparent)', backdropFilter: 'blur(3px)',
           pointerEvents: 'none',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-            <SpinnerSVG />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+            <SpinnerSVG size={isLargeGraph ? 36 : 28} />
             <span style={{ fontSize: '11px', color: 'var(--t3)', letterSpacing: '0.07em' }}>
               {t(activeQuery.isLoading ? 'status.loading' : 'canvas.computingLayout')}
             </span>
+            {isLargeGraph && layouting && (
+              <>
+                <span style={{ fontSize: '10px', color: 'var(--t4)', letterSpacing: '0.05em' }}>
+                  {t('canvas.nodeCount', { count: pendingNodeCount })}
+                </span>
+                <LoadingDots />
+              </>
+            )}
           </div>
         </div>
       )}
@@ -275,13 +289,37 @@ export const LoomCanvas = memo(() => (
 LoomCanvas.displayName = 'LoomCanvas';
 
 // ─── Spinner SVG (no dependency) ─────────────────────────────────────────────
-function SpinnerSVG() {
+function SpinnerSVG({ size = 28 }: { size?: number }) {
+  const half = size / 2;
+  const r    = half - 3;
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none"
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none"
       style={{ animation: 'spin 0.8s linear infinite' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-      <circle cx="14" cy="14" r="11" stroke="var(--seer-border-2)" strokeWidth="2.5" />
-      <path d="M14 3 A11 11 0 0 1 25 14" stroke="var(--seer-accent)" strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx={half} cy={half} r={r} stroke="var(--seer-border-2)" strokeWidth="2.5" />
+      <path d={`M${half} ${half - r} A${r} ${r} 0 0 1 ${half + r} ${half}`}
+        stroke="var(--seer-accent)" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
+  );
+}
+
+// ─── Pulsing dots for large-graph wait hint ───────────────────────────────────
+function LoadingDots() {
+  return (
+    <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+      <style>{`
+        @keyframes dotPulse {
+          0%, 80%, 100% { opacity: 0.2; transform: scale(0.75); }
+          40%            { opacity: 1;   transform: scale(1);    }
+        }
+      `}</style>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{
+          width: 5, height: 5, borderRadius: '50%',
+          background: 'var(--seer-accent)',
+          animation: `dotPulse 1.4s ease-in-out ${i * 0.22}s infinite`,
+        }} />
+      ))}
+    </div>
   );
 }
