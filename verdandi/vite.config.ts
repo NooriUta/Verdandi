@@ -28,6 +28,7 @@ export default defineConfig({
     coverage:    { provider: 'v8', reporter: ['text', 'html'] },
   },
   server: {
+    host: '127.0.0.1',  // bind to IPv4 so browsers can reach it
     // Dev proxy: forward /graphql → SHUTTLE on 8080 (bypasses rbac-proxy which isn't running locally)
     proxy: {
       '/graphql': {

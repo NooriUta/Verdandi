@@ -29,6 +29,7 @@ import { NodeContextMenu }  from './NodeContextMenu';
 import { ExportPanel }      from './ExportPanel';
 import type { ContextMenuState } from './NodeContextMenu';
 
+import { ErrorBoundary }            from '../ErrorBoundary';
 import { useLoomStore }            from '../../stores/loomStore';
 import { clearLayoutCache }        from '../../utils/layoutGraph';
 import { isUnauthorized }          from '../../services/lineage';
