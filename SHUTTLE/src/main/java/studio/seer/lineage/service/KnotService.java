@@ -140,26 +140,29 @@ public class KnotService {
             LIMIT 1
             """;
 
-        // Routine count — edge: DaliSession-[BELONGS_TO_SESSION]->DaliRoutine
+        // Routine count — uses DaliRoutine(session_id) NOTUNIQUE index directly.
+        // Was: in('BELONGS_TO_SESSION')[session_id=:sid].size() > 0 — O(n) full scan.
         String sqlRoutineCount = """
             SELECT count(*) AS routineCount
             FROM DaliRoutine
-            WHERE in('BELONGS_TO_SESSION')[session_id = :sid].size() > 0
+            WHERE session_id = :sid
             """;
 
-        // Stmt geoids — stmt_type and line_number are null in DB, parse from geoid
+        // Stmt geoids — uses DaliStatement(session_id) NOTUNIQUE index directly.
+        // Was: in('CONTAINS_STMT').in('BELONGS_TO_SESSION')[...].size() > 0 — 2-hop reverse scan.
         String sqlStmtGeoids = """
             SELECT stmt_geoid
             FROM DaliStatement
-            WHERE in('CONTAINS_STMT').in('BELONGS_TO_SESSION')[session_id = :sid].size() > 0
+            WHERE session_id = :sid
               AND outE('CHILD_OF').size() = 0
             """;
 
-        // Atom counts grouped by status
+        // Atom counts grouped by status — uses DaliAtom(session_id) NOTUNIQUE index directly.
+        // Was: 3-hop reverse traversal on ALL atoms (561 995 rows) — catastrophic full scan.
         String sqlAtoms = """
             SELECT status, count(*) AS cnt
             FROM DaliAtom
-            WHERE in('HAS_ATOM').in('CONTAINS_STMT').in('BELONGS_TO_SESSION')[session_id = :sid].size() > 0
+            WHERE session_id = :sid
             GROUP BY status
             """;
 
@@ -235,11 +238,10 @@ public class KnotService {
     // ── Tables ────────────────────────────────────────────────────────────────
 
     private Uni<List<KnotTable>> loadTables(Map<String, Object> params) {
-        // Correct path: Session -[BELONGS_TO_SESSION]-> Routine -[CONTAINS_STMT]-> Statement -[READS_FROM|WRITES_TO]-> Table
+        // Both queries start from DaliStatement(session_id) NOTUNIQUE index.
+        // Avoids 3-hop traversal Session→Routine→Statement used in the original code.
         String cypherMain = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
-            MATCH (stmt)-[:READS_FROM|WRITES_TO]->(t:DaliTable)
+            MATCH (stmt:DaliStatement {session_id: $sid})-[:READS_FROM|WRITES_TO]->(t:DaliTable)
             OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:DaliColumn)
             WITH t, c
             RETURN DISTINCT
@@ -258,39 +260,34 @@ public class KnotService {
             LIMIT 300
             """;
 
-        // Count READS_FROM and WRITES_TO per table by name (geoid may be null)
-        String cypherSrc = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)-[:READS_FROM]->(t:DaliTable)
-            RETURN t.table_name AS tableName, count(*) AS cnt
-            """;
-
-        String cypherTgt = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)-[:WRITES_TO]->(t:DaliTable)
-            RETURN t.table_name AS tableName, count(*) AS cnt
+        // READS_FROM and WRITES_TO counts in a single query — split by edgeType in Java.
+        // Was: 2 separate Cypher queries with 3-hop traversal each (3 total → now 2).
+        String cypherCounts = """
+            MATCH (stmt:DaliStatement {session_id: $sid})-[e:READS_FROM|WRITES_TO]->(t:DaliTable)
+            RETURN t.table_name AS tableName, type(e) AS edgeType, count(*) AS cnt
             """;
 
         return Uni.combine().all()
             .unis(
-                arcade.cypher(cypherMain, params).onFailure().recoverWithItem(List.of()),
-                arcade.cypher(cypherSrc,  params).onFailure().recoverWithItem(List.of()),
-                arcade.cypher(cypherTgt,  params).onFailure().recoverWithItem(List.of())
+                arcade.cypher(cypherMain,   params).onFailure().recoverWithItem(List.of()),
+                arcade.cypher(cypherCounts, params).onFailure().recoverWithItem(List.of())
             )
             .asTuple()
-            .map(t -> buildTables(t.getItem1(), t.getItem2(), t.getItem3()));
+            .map(t -> buildTables(t.getItem1(), t.getItem2()));
     }
 
     private List<KnotTable> buildTables(
         List<Map<String, Object>> rows,
-        List<Map<String, Object>> srcRows,
-        List<Map<String, Object>> tgtRows
+        List<Map<String, Object>> countRows
     ) {
-        // Build name → count maps for source/target usage
+        // Split merged count query by edgeType into src/tgt maps
         Map<String, Integer> srcMap = new HashMap<>();
-        for (var r : srcRows) srcMap.put(str(r, "tableName"), num(r, "cnt"));
         Map<String, Integer> tgtMap = new HashMap<>();
-        for (var r : tgtRows) tgtMap.put(str(r, "tableName"), num(r, "cnt"));
+        for (var r : countRows) {
+            String name = str(r, "tableName");
+            if ("READS_FROM".equals(str(r, "edgeType"))) srcMap.put(name, num(r, "cnt"));
+            else                                          tgtMap.put(name, num(r, "cnt"));
+        }
 
         LinkedHashMap<String, List<Map<String, Object>>> byTable = new LinkedHashMap<>();
         for (var r : rows) {
@@ -344,12 +341,15 @@ public class KnotService {
         // Fetch ALL statements for the session (not just roots).
         // Tree is built in Java via CHILD_OF edges from a second query.
         // Atom status values in hound DB: 'Обработано' | 'unresolved' | 'constant' | 'function_call'
+        // All queries start from DaliStatement(session_id) NOTUNIQUE index — avoids 3-hop
+        // traversal prefix Session→Routine→Statement used in older versions.
+
         // Query 1: statement metadata + atom counts.
         // Sources/targets are intentionally NOT collected here to avoid Cartesian product
         // with atoms that breaks collect(DISTINCT {aliases: list}) in ArcadeDB Cypher.
         String cypherStmts = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            MATCH (stmt:DaliStatement {session_id: $sid})
+            MATCH (r:DaliRoutine)-[:CONTAINS_STMT]->(stmt)
             OPTIONAL MATCH (stmt)-[:HAS_ATOM]->(a:DaliAtom)
             RETURN id(stmt)                                                         AS sid,
                    stmt.stmt_geoid                                                  AS geoid,
@@ -369,8 +369,7 @@ public class KnotService {
 
         // Query 2: TABLE sources/targets — READS_FROM/WRITES_TO → DaliTable
         String cypherTables = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            MATCH (stmt:DaliStatement {session_id: $sid})
             OPTIONAL MATCH (stmt)-[rf:READS_FROM]->(src:DaliTable)
             OPTIONAL MATCH (stmt)-[wt:WRITES_TO]->(tgt:DaliTable)
             RETURN id(stmt)                             AS sid,
@@ -385,8 +384,7 @@ public class KnotService {
 
         // Query 3: STMT sources — USES_SUBQUERY → DaliStatement (inline subqueries)
         String cypherStmtSrc = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            MATCH (stmt:DaliStatement {session_id: $sid})
             MATCH (stmt)-[rf:USES_SUBQUERY]->(src:DaliStatement)
             RETURN id(stmt)                             AS sid,
                    src.stmt_geoid                       AS srcGeoid,
@@ -396,9 +394,7 @@ public class KnotService {
 
         // Query 4: CHILD_OF direction: child -[CHILD_OF]-> parent
         String cypherEdges = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(child:DaliStatement)
-            MATCH (child)-[:CHILD_OF]->(parent:DaliStatement)
+            MATCH (child:DaliStatement {session_id: $sid})-[:CHILD_OF]->(parent:DaliStatement)
             RETURN id(child) AS childId, id(parent) AS parentId
             """;
 
@@ -541,10 +537,10 @@ public class KnotService {
         // Cypher instead of SQL — each graph edge traversal is an explicit OPTIONAL MATCH,
         // which is safe and portable. ArcadeDB SQL out()[0].field syntax is fragile
         // (returns null or wrong type when the edge list is empty).
+        // Start from DaliAtom(session_id) NOTUNIQUE index — avoids 3-hop traversal prefix.
+        // Reverse edge (a)<-[:HAS_ATOM]-(stmt) is a single RID lookup after index hit.
         String cypher = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
-            MATCH (stmt)-[:HAS_ATOM]->(a:DaliAtom)
+            MATCH (a:DaliAtom {session_id: $sid})<-[:HAS_ATOM]-(stmt:DaliStatement)
             OPTIONAL MATCH (a)-[:ATOM_PRODUCES]->(oc:DaliOutputColumn)
             OPTIONAL MATCH (a)-[:ATOM_REF_OUTPUT_COL]->(roc:DaliOutputColumn)
             OPTIONAL MATCH (a)-[:ATOM_REF_STMT]->(rs:DaliStatement)
@@ -572,9 +568,8 @@ public class KnotService {
                    coalesce(a.is_routine_param, false)         AS isRoutineParam,
                    coalesce(a.is_routine_var, false)           AS isRoutineVar,
                    a.nested_atoms_count                        AS nestedAtomsCount
-            ORDER BY stmtGeoid
             LIMIT 5000
-            """;
+            """; // ORDER BY removed — Java re-sorts by stmtGeoid+atomLine+atomPos below
 
         return arcade.cypher(cypher, params)
             .onFailure().recoverWithItem(List.of())
@@ -620,9 +615,9 @@ public class KnotService {
     private Uni<List<KnotCall>> loadCalls(Map<String, Object> params) {
         // CALLS edge: DaliRoutine -[CALLS]-> DaliRoutine (or any vertex)
         // Edge properties: callee_name, line_start; caller identified by caller node
+        // Start from DaliRoutine(session_id) index — avoids 2-hop traversal prefix.
         String cypher = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(caller:DaliRoutine)
-            MATCH (caller)-[c:CALLS]->(callee)
+            MATCH (caller:DaliRoutine {session_id: $sid})-[c:CALLS]->(callee)
             RETURN caller.routine_name                             AS callerName,
                    coalesce(caller.package_geoid, '')             AS callerPackage,
                    coalesce(c.callee_name, callee.routine_name, '') AS calleeName,
@@ -647,10 +642,9 @@ public class KnotService {
     // ── Output columns ───────────────────────────────────────────────────────
 
     private Uni<List<KnotOutputColumn>> loadOutputColumns(Map<String, Object> params) {
+        // Start from DaliStatement(session_id) index — avoids 3-hop traversal prefix.
         String cypher = """
-            MATCH (stmt:DaliStatement)<-[:CONTAINS_STMT]-(r:DaliRoutine)
-                  <-[:BELONGS_TO_SESSION]-(sess:DaliSession {session_id: $sid})
-            MATCH (stmt)-[:HAS_OUTPUT_COL]->(oc:DaliOutputColumn)
+            MATCH (stmt:DaliStatement {session_id: $sid})-[:HAS_OUTPUT_COL]->(oc:DaliOutputColumn)
             OPTIONAL MATCH (a:DaliAtom)-[:ATOM_PRODUCES]->(oc)
             RETURN stmt.stmt_geoid             AS stmtGeoid,
                    coalesce(oc.col_order, 0)   AS colOrder,
@@ -706,9 +700,9 @@ public class KnotService {
     // ── Affected columns ─────────────────────────────────────────────────────
 
     private Uni<List<KnotAffectedColumn>> loadAffectedColumns(Map<String, Object> params) {
+        // Start from DaliStatement(session_id) index — avoids 3-hop traversal prefix.
         String cypher = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)-[:HAS_AFFECTED_COL]->(col:DaliAffectedColumn)
+            MATCH (stmt:DaliStatement {session_id: $sid})-[:HAS_AFFECTED_COL]->(col:DaliAffectedColumn)
             RETURN stmt.stmt_geoid                            AS stmtGeoid,
                    coalesce(col.column_name, '')              AS columnName,
                    coalesce(col.table_name, '')               AS tableName,
@@ -733,8 +727,10 @@ public class KnotService {
     // ── Parameters & Variables ────────────────────────────────────────────────
 
     private Uni<KnotParamVars> loadParamsAndVars(Map<String, Object> params) {
+        // All three use DaliRoutine(session_id) NOTUNIQUE index directly.
+        // Was: 2-hop traversal Session→BELONGS_TO_SESSION→Routine.
         String cypherRoutines = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
+            MATCH (r:DaliRoutine {session_id: $sid})
             RETURN r.routine_name                AS routineName,
                    coalesce(r.routine_type, '')  AS routineType,
                    coalesce(r.package_geoid, '') AS packageGeoid
@@ -743,8 +739,7 @@ public class KnotService {
             """;
 
         String cypherParams = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:HAS_PARAMETER]->(p:DaliParameter)
+            MATCH (r:DaliRoutine {session_id: $sid})-[:HAS_PARAMETER]->(p:DaliParameter)
             RETURN r.routine_name                   AS routineName,
                    p.param_name                     AS paramName,
                    coalesce(p.data_type, '')         AS dataType,
@@ -754,8 +749,7 @@ public class KnotService {
             """;
 
         String cypherVars = """
-            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
-            MATCH (r)-[:HAS_VARIABLE]->(v:DaliVariable)
+            MATCH (r:DaliRoutine {session_id: $sid})-[:HAS_VARIABLE]->(v:DaliVariable)
             RETURN r.routine_name                   AS routineName,
                    v.var_name                       AS varName,
                    coalesce(v.data_type, '')         AS dataType
