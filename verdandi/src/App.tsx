@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { Shell } from './components/layout/Shell';
 import { LoginPage } from './components/auth/LoginPage';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastContainer } from './components/Toast';
 import { useAuthStore } from './stores/authStore';
 
 const KnotPage = lazy(() =>
@@ -36,6 +38,18 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <AppRoutes />
+      <ToastContainer />
+    </BrowserRouter>
+  );
+}
+
+/** Separated so useLocation() is inside BrowserRouter. */
+function AppRoutes() {
+  const { pathname } = useLocation();
+
+  return (
+    <ErrorBoundary resetKey={pathname}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
 
@@ -89,6 +103,6 @@ export default function App() {
           }
         />
       </Routes>
-    </BrowserRouter>
+    </ErrorBoundary>
   );
 }
