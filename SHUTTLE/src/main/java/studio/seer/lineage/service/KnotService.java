@@ -116,15 +116,15 @@ public class KnotService {
             .map(t -> {
                 KnotParamVars pv = t.getItem9();
                 return new KnotReport(
-                    t.getItem1(), t.getItem2(), t.getItem3(),
+                    t.getItem1(), t.getItem2(), pv.routines(), t.getItem3(),
                     t.getItem4(), t.getItem5(), t.getItem6(), t.getItem7(),
                     t.getItem8(), pv.parameters(), pv.variables()
                 );
             });
     }
 
-    /** Internal holder for params + vars combined query. */
-    private record KnotParamVars(List<KnotParameter> parameters, List<KnotVariable> variables) {}
+    /** Internal holder for params + vars + routines combined query. */
+    private record KnotParamVars(List<KnotRoutine> routines, List<KnotParameter> parameters, List<KnotVariable> variables) {}
 
     // ── Session summary ───────────────────────────────────────────────────────
 
@@ -344,11 +344,12 @@ public class KnotService {
         // Fetch ALL statements for the session (not just roots).
         // Tree is built in Java via CHILD_OF edges from a second query.
         // Atom status values in hound DB: 'Обработано' | 'unresolved' | 'constant' | 'function_call'
+        // Query 1: statement metadata + atom counts.
+        // Sources/targets are intentionally NOT collected here to avoid Cartesian product
+        // with atoms that breaks collect(DISTINCT {aliases: list}) in ArcadeDB Cypher.
         String cypherStmts = """
             MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
             MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
-            OPTIONAL MATCH (stmt)-[:READS_FROM]->(src:DaliTable)
-            OPTIONAL MATCH (stmt)-[:WRITES_TO]->(tgt:DaliTable)
             OPTIONAL MATCH (stmt)-[:HAS_ATOM]->(a:DaliAtom)
             RETURN id(stmt)                                                         AS sid,
                    stmt.stmt_geoid                                                  AS geoid,
@@ -357,17 +358,43 @@ public class KnotService {
                    r.routine_name                                                   AS routineName,
                    coalesce(r.routine_type, '')                                     AS routineType,
                    stmt.aliases                                                     AS stmtAliases,
-                   collect(DISTINCT src.table_name)                                 AS sources,
-                   collect(DISTINCT tgt.table_name)                                 AS targets,
                    count(a)                                                         AS atomTotal,
-                   count(CASE WHEN a.status='Обработано'    THEN 1 END)             AS atomResolved,
-                   count(CASE WHEN a.status='unresolved'    THEN 1 END)             AS atomFailed,
-                   count(CASE WHEN a.status='constant'      THEN 1 END)             AS atomConst
+                   count(CASE WHEN toLower(a.status)='обработано'  THEN 1 END)     AS atomResolved,
+                   count(CASE WHEN toLower(a.status)='unresolved'  THEN 1 END)     AS atomFailed,
+                   count(CASE WHEN toLower(a.status)='constant'    THEN 1 END)     AS atomConst,
+                   count(CASE WHEN toLower(a.status)='function_call' THEN 1 END)   AS atomFunc
             ORDER BY r.routine_name, geoid
             LIMIT 1000
             """;
 
-        // CHILD_OF direction: child -[CHILD_OF]-> parent
+        // Query 2: TABLE sources/targets — READS_FROM/WRITES_TO → DaliTable
+        String cypherTables = """
+            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
+            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            OPTIONAL MATCH (stmt)-[rf:READS_FROM]->(src:DaliTable)
+            OPTIONAL MATCH (stmt)-[wt:WRITES_TO]->(tgt:DaliTable)
+            RETURN id(stmt)                             AS sid,
+                   src.table_name                       AS srcName,
+                   coalesce(src.table_geoid, '')        AS srcGeoid,
+                   rf.aliases                           AS srcAliases,
+                   tgt.table_name                       AS tgtName,
+                   coalesce(tgt.table_geoid, '')        AS tgtGeoid,
+                   wt.aliases                           AS tgtAliases
+            LIMIT 5000
+            """;
+
+        // Query 3: STMT sources — USES_SUBQUERY → DaliStatement (inline subqueries)
+        String cypherStmtSrc = """
+            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
+            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            MATCH (stmt)-[rf:USES_SUBQUERY]->(src:DaliStatement)
+            RETURN id(stmt)                             AS sid,
+                   src.stmt_geoid                       AS srcGeoid,
+                   rf.aliases                           AS srcAliases
+            LIMIT 5000
+            """;
+
+        // Query 4: CHILD_OF direction: child -[CHILD_OF]-> parent
         String cypherEdges = """
             MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
             MATCH (r)-[:CONTAINS_STMT]->(child:DaliStatement)
@@ -377,38 +404,93 @@ public class KnotService {
 
         return Uni.combine().all()
             .unis(
-                arcade.cypher(cypherStmts, params).onFailure().recoverWithItem(List.of()),
-                arcade.cypher(cypherEdges, params).onFailure().recoverWithItem(List.of())
+                arcade.cypher(cypherStmts,   params).onFailure().recoverWithItem(List.of()),
+                arcade.cypher(cypherTables,  params).onFailure().recoverWithItem(List.of()),
+                arcade.cypher(cypherStmtSrc, params).onFailure().recoverWithItem(List.of()),
+                arcade.cypher(cypherEdges,   params).onFailure().recoverWithItem(List.of())
             )
             .asTuple()
-            .map(t -> buildStatementTree(t.getItem1(), t.getItem2()));
+            .map(t -> buildStatementTree(t.getItem1(), t.getItem2(), t.getItem3(), t.getItem4()));
     }
 
     private List<KnotStatement> buildStatementTree(
         List<Map<String, Object>> stmtRows,
+        List<Map<String, Object>> tableRows,
+        List<Map<String, Object>> stmtSrcRows,
         List<Map<String, Object>> edgeRows
     ) {
+        // Build source/target maps: stmtId → LinkedHashMap<key, KnotSourceRef> (deduplicated)
+        Map<String, Map<String, KnotSourceRef>> srcByStmt = new LinkedHashMap<>();
+        Map<String, Map<String, KnotSourceRef>> tgtByStmt = new LinkedHashMap<>();
+
+        // TABLE sources/targets
+        for (var r : tableRows) {
+            String sid = str(r, "sid");
+            String srcName = str(r, "srcName");
+            if (!srcName.isEmpty()) {
+                srcByStmt.computeIfAbsent(sid, k -> new LinkedHashMap<>())
+                    .putIfAbsent(srcName, new KnotSourceRef(
+                        srcName,
+                        str(r, "srcGeoid"),
+                        toStringList(r.get("srcAliases")),
+                        "TABLE"
+                    ));
+            }
+            String tgtName = str(r, "tgtName");
+            if (!tgtName.isEmpty()) {
+                tgtByStmt.computeIfAbsent(sid, k -> new LinkedHashMap<>())
+                    .putIfAbsent(tgtName, new KnotSourceRef(
+                        tgtName,
+                        str(r, "tgtGeoid"),
+                        toStringList(r.get("tgtAliases")),
+                        "TABLE"
+                    ));
+            }
+        }
+
+        // STMT sources (CTEs, subqueries) — READS_FROM → DaliStatement
+        for (var r : stmtSrcRows) {
+            String sid      = str(r, "sid");
+            String srcGeoid = str(r, "srcGeoid");
+            if (!srcGeoid.isEmpty()) {
+                // Use stmt_geoid as key; short display name = last meaningful segment
+                String displayName = parseStmtShortName(srcGeoid);
+                srcByStmt.computeIfAbsent(sid, k -> new LinkedHashMap<>())
+                    .putIfAbsent(srcGeoid, new KnotSourceRef(
+                        displayName,
+                        srcGeoid,
+                        toStringList(r.get("srcAliases")),
+                        "STMT"
+                    ));
+            }
+        }
+
         // Build flat map of all statements (children list is mutable ArrayList)
         LinkedHashMap<String, KnotStatement> byId = new LinkedHashMap<>();
         for (var r : stmtRows) {
-            String id       = str(r, "sid");
-            String geoid    = str(r, "geoid");
+            String id         = str(r, "sid");
+            String geoid      = str(r, "geoid");
             String stmtTypeDb = str(r, "stmtType");
             int    lineStartDb = num(r, "lineStart");
+            List<KnotSourceRef> sources = srcByStmt.containsKey(id)
+                ? new ArrayList<>(srcByStmt.get(id).values()) : List.of();
+            List<KnotSourceRef> targets = tgtByStmt.containsKey(id)
+                ? new ArrayList<>(tgtByStmt.get(id).values()) : List.of();
             byId.put(id, new KnotStatement(
                 id, geoid,
                 !stmtTypeDb.isEmpty() ? stmtTypeDb : parseStmtType(geoid),
-                lineStartDb > 0      ? lineStartDb  : parseLineNumber(geoid),
+                lineStartDb > 0       ? lineStartDb  : parseLineNumber(geoid),
                 str(r, "routineName"),
                 parsePackageName(geoid),
                 str(r, "routineType"),
-                toStringList(r.get("sources")),
-                toStringList(r.get("targets")),
+                sources,
+                targets,
                 toStringList(r.get("stmtAliases")),
                 num(r, "atomTotal"),
                 num(r, "atomResolved"),
                 num(r, "atomFailed"),
                 num(r, "atomConst"),
+                num(r, "atomFunc"),
                 new ArrayList<>()
             ));
         }
@@ -456,62 +538,81 @@ public class KnotService {
     // ── Atoms ─────────────────────────────────────────────────────────────────
 
     private Uni<List<KnotAtom>> loadAtoms(Map<String, Object> params) {
-        String sql = """
-            SELECT statement_geoid, atom_text, column_name,
-                   coalesce(table_geoid, '')           AS table_geoid,
-                   coalesce(table_name,  '')           AS table_name,
-                   coalesce(status, '')                AS status,
-                   coalesce(atom_context, '')          AS atom_context,
-                   coalesce(parent_context, '')        AS parent_context,
-                   output_column_sequence,
-                   coalesce(out('ATOM_PRODUCES')[0].name, '')     AS output_col_name,
-                   coalesce(out('ATOM_REF_OUTPUT_COL')[0].name, '') AS ref_source_name,
-                   is_column_reference, is_function_call, is_constant,
-                   coalesce(s_complex, false)          AS s_complex,
-                   coalesce(is_routine_param, false)   AS is_routine_param,
-                   coalesce(is_routine_var, false)     AS is_routine_var,
-                   nested_atoms_count
-            FROM DaliAtom
-            WHERE session_id = :sid
-            ORDER BY statement_geoid
+        // Cypher instead of SQL — each graph edge traversal is an explicit OPTIONAL MATCH,
+        // which is safe and portable. ArcadeDB SQL out()[0].field syntax is fragile
+        // (returns null or wrong type when the edge list is empty).
+        String cypher = """
+            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
+            MATCH (r)-[:CONTAINS_STMT]->(stmt:DaliStatement)
+            MATCH (stmt)-[:HAS_ATOM]->(a:DaliAtom)
+            OPTIONAL MATCH (a)-[:ATOM_PRODUCES]->(oc:DaliOutputColumn)
+            OPTIONAL MATCH (a)-[:ATOM_REF_OUTPUT_COL]->(roc:DaliOutputColumn)
+            OPTIONAL MATCH (a)-[:ATOM_REF_STMT]->(rs:DaliStatement)
+            OPTIONAL MATCH (a)-[:ATOM_REF_COLUMN]->(rc:DaliColumn)
+            OPTIONAL MATCH (a)-[:ATOM_REF_TABLE]->(rt:DaliTable)
+            RETURN stmt.stmt_geoid                             AS stmtGeoid,
+                   coalesce(a.atom_text, '')                   AS atomText,
+                   coalesce(a.column_name, '')                 AS columnName,
+                   coalesce(a.table_geoid, '')                 AS tableGeoid,
+                   coalesce(a.table_name, '')                  AS tableName,
+                   coalesce(a.status, '')                      AS status,
+                   coalesce(a.atom_context, '')                AS atomContext,
+                   coalesce(a.parent_context, '')              AS parentContext,
+                   a.output_column_sequence                    AS outputColumnSequence,
+                   coalesce(oc.name, '')                       AS outputColName,
+                   coalesce(roc.output_col_name, roc.name, '') AS refSourceName,
+                   coalesce(rs.stmt_geoid, '')                 AS refStmtGeoid,
+                   coalesce(rc.column_name, '')                AS refColEdge,
+                   coalesce(rt.table_name, '')                 AS refTblEdge,
+                   coalesce(rt.table_geoid, '')                AS refTblGeoidEdge,
+                   coalesce(a.is_column_reference, false)      AS isColumnRef,
+                   coalesce(a.is_function_call, false)         AS isFuncCall,
+                   coalesce(a.is_constant, false)              AS isConst,
+                   coalesce(a.s_complex, false)                AS isComplex,
+                   coalesce(a.is_routine_param, false)         AS isRoutineParam,
+                   coalesce(a.is_routine_var, false)           AS isRoutineVar,
+                   a.nested_atoms_count                        AS nestedAtomsCount
+            ORDER BY stmtGeoid
             LIMIT 5000
             """;
 
-        return arcade.sql(sql, params)
+        return arcade.cypher(cypher, params)
             .onFailure().recoverWithItem(List.of())
-            .map(rows -> {
-                List<KnotAtom> atoms = rows.stream()
-                    .map(r -> {
-                        String atomText = str(r, "atom_text");
-                        return new KnotAtom(
-                            str(r, "statement_geoid"),
-                            atomText,
-                            str(r, "column_name"),
-                            str(r, "table_geoid"),
-                            str(r, "table_name"),
-                            str(r, "status"),
-                            str(r, "atom_context"),
-                            str(r, "parent_context"),
-                            intOrNull(r, "output_column_sequence"),
-                            str(r, "output_col_name"),
-                            str(r, "ref_source_name"),
-                            bool(r, "is_column_reference"),
-                            bool(r, "is_function_call"),
-                            bool(r, "is_constant"),
-                            bool(r, "s_complex"),
-                            bool(r, "is_routine_param"),
-                            bool(r, "is_routine_var"),
-                            intOrNull(r, "nested_atoms_count"),
-                            atomLine(atomText),
-                            atomPos(atomText)
-                        );
-                    })
-                    .sorted(Comparator.comparing(KnotAtom::stmtGeoid)
-                        .thenComparingInt(KnotAtom::atomLine)
-                        .thenComparingInt(KnotAtom::atomPos))
-                    .toList();
-                return atoms;
-            });
+            .map(rows -> rows.stream()
+                .map(r -> {
+                    String atomText = str(r, "atomText");
+                    return new KnotAtom(
+                        str(r, "stmtGeoid"),
+                        atomText,
+                        str(r, "columnName"),
+                        str(r, "tableGeoid"),
+                        str(r, "tableName"),
+                        str(r, "status"),
+                        str(r, "atomContext"),
+                        str(r, "parentContext"),
+                        intOrNull(r, "outputColumnSequence"),
+                        str(r, "outputColName"),
+                        str(r, "refSourceName"),
+                        str(r, "refStmtGeoid"),
+                        str(r, "refColEdge"),
+                        str(r, "refTblEdge"),
+                        str(r, "refTblGeoidEdge"),
+                        bool(r, "isColumnRef"),
+                        bool(r, "isFuncCall"),
+                        bool(r, "isConst"),
+                        bool(r, "isComplex"),
+                        bool(r, "isRoutineParam"),
+                        bool(r, "isRoutineVar"),
+                        intOrNull(r, "nestedAtomsCount"),
+                        atomLine(atomText),
+                        atomPos(atomText)
+                    );
+                })
+                .sorted(Comparator.comparing(KnotAtom::stmtGeoid)
+                    .thenComparingInt(KnotAtom::atomLine)
+                    .thenComparingInt(KnotAtom::atomPos))
+                .toList()
+            );
     }
 
     // ── Routine calls ─────────────────────────────────────────────────────────
@@ -546,30 +647,58 @@ public class KnotService {
     // ── Output columns ───────────────────────────────────────────────────────
 
     private Uni<List<KnotOutputColumn>> loadOutputColumns(Map<String, Object> params) {
-        String sql = """
-            SELECT statement_geoid, name, expression,
-                   coalesce(alias, '')       AS alias,
-                   coalesce(col_order, 0)    AS col_order,
-                   coalesce(source_type, '') AS source_type,
-                   coalesce(table_ref, '')   AS table_ref
-            FROM DaliOutputColumn
-            WHERE session_id = :sid
-            ORDER BY statement_geoid, col_order
+        String cypher = """
+            MATCH (stmt:DaliStatement)<-[:CONTAINS_STMT]-(r:DaliRoutine)
+                  <-[:BELONGS_TO_SESSION]-(sess:DaliSession {session_id: $sid})
+            MATCH (stmt)-[:HAS_OUTPUT_COL]->(oc:DaliOutputColumn)
+            OPTIONAL MATCH (a:DaliAtom)-[:ATOM_PRODUCES]->(oc)
+            RETURN stmt.stmt_geoid             AS stmtGeoid,
+                   coalesce(oc.col_order, 0)   AS colOrder,
+                   coalesce(oc.name, '')        AS name,
+                   coalesce(oc.expression, '')  AS expression,
+                   coalesce(oc.alias, '')       AS alias,
+                   coalesce(oc.source_type, '') AS sourceType,
+                   coalesce(oc.table_ref, '')   AS tableRef,
+                   collect({
+                       text:   a.atom_text,
+                       col:    a.column_name,
+                       tbl:    a.table_name,
+                       status: a.status
+                   })                          AS atoms
+            ORDER BY stmtGeoid, colOrder
             LIMIT 5000
             """;
 
-        return arcade.sql(sql, params)
+        return arcade.cypher(cypher, params)
             .onFailure().recoverWithItem(List.of())
             .map(rows -> rows.stream()
-                .map(r -> new KnotOutputColumn(
-                    str(r, "statement_geoid"),
-                    str(r, "name"),
-                    str(r, "expression"),
-                    str(r, "alias"),
-                    num(r, "col_order"),
-                    str(r, "source_type"),
-                    str(r, "table_ref")
-                ))
+                .map(r -> {
+                    // collect() with OPTIONAL MATCH returns [{text:null,...}] when no atom — filter out
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> rawAtoms =
+                        (List<Map<String, Object>>) r.getOrDefault("atoms", List.of());
+
+                    List<KnotOutputColumnAtom> atoms = rawAtoms.stream()
+                        .filter(a -> a.get("text") != null)
+                        .map(a -> new KnotOutputColumnAtom(
+                            str(a, "text"),
+                            str(a, "col"),
+                            str(a, "tbl"),
+                            str(a, "status")
+                        ))
+                        .toList();
+
+                    return new KnotOutputColumn(
+                        str(r, "stmtGeoid"),
+                        str(r, "name"),
+                        str(r, "expression"),
+                        str(r, "alias"),
+                        num(r, "colOrder"),
+                        str(r, "sourceType"),
+                        str(r, "tableRef"),
+                        atoms
+                    );
+                })
                 .toList()
             );
     }
@@ -604,6 +733,15 @@ public class KnotService {
     // ── Parameters & Variables ────────────────────────────────────────────────
 
     private Uni<KnotParamVars> loadParamsAndVars(Map<String, Object> params) {
+        String cypherRoutines = """
+            MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
+            RETURN r.routine_name                AS routineName,
+                   coalesce(r.routine_type, '')  AS routineType,
+                   coalesce(r.package_geoid, '') AS packageGeoid
+            ORDER BY routineName
+            LIMIT 5000
+            """;
+
         String cypherParams = """
             MATCH (sess:DaliSession {session_id: $sid})-[:BELONGS_TO_SESSION]->(r:DaliRoutine)
             MATCH (r)-[:HAS_PARAMETER]->(p:DaliParameter)
@@ -627,12 +765,21 @@ public class KnotService {
 
         return Uni.combine().all()
             .unis(
-                arcade.cypher(cypherParams, params).onFailure().recoverWithItem(List.of()),
-                arcade.cypher(cypherVars,   params).onFailure().recoverWithItem(List.of())
+                arcade.cypher(cypherRoutines, params).onFailure().recoverWithItem(List.of()),
+                arcade.cypher(cypherParams,   params).onFailure().recoverWithItem(List.of()),
+                arcade.cypher(cypherVars,     params).onFailure().recoverWithItem(List.of())
             )
             .asTuple()
             .map(t -> {
-                List<KnotParameter> pList = t.getItem1().stream()
+                List<KnotRoutine> rList = t.getItem1().stream()
+                    .map(r -> new KnotRoutine(
+                        str(r, "routineName"),
+                        str(r, "routineType"),
+                        str(r, "packageGeoid")
+                    ))
+                    .toList();
+
+                List<KnotParameter> pList = t.getItem2().stream()
                     .map(r -> new KnotParameter(
                         str(r, "routineName"),
                         str(r, "paramName"),
@@ -641,7 +788,7 @@ public class KnotService {
                     ))
                     .toList();
 
-                List<KnotVariable> vList = t.getItem2().stream()
+                List<KnotVariable> vList = t.getItem3().stream()
                     .map(r -> new KnotVariable(
                         str(r, "routineName"),
                         str(r, "varName"),
@@ -649,7 +796,7 @@ public class KnotService {
                     ))
                     .toList();
 
-                return new KnotParamVars(pList, vList);
+                return new KnotParamVars(rList, pList, vList);
             });
     }
 
@@ -677,6 +824,20 @@ public class KnotService {
             catch (NumberFormatException ignored) { return 0; }
         }
         return 0;
+    }
+
+    /**
+     * Short display name for a statement used as a source (CTE/subquery).
+     * Returns "ROUTINE_NAME:STMT_TYPE:LINE" — enough to identify it without full geoid noise.
+     * E.g. "DWH.PKG:PROCEDURE:LOAD:SELECT:42" → "LOAD:SELECT:42"
+     */
+    static String parseStmtShortName(String geoid) {
+        if (geoid == null || geoid.isEmpty()) return "?";
+        String[] parts = geoid.split(":");
+        // parts: [0]=pkg, [1]=routineType, [2]=routineName, [3]=stmtType, [4]=line, ...
+        if (parts.length >= 5) return parts[2] + ":" + parts[3] + ":" + parts[4];
+        if (parts.length >= 3) return parts[2];
+        return geoid;
     }
 
     /**
@@ -763,8 +924,18 @@ public class KnotService {
                 .filter(s -> !s.isEmpty())
                 .toList();
         }
+        // ArcadeDB Cypher may return array-type properties as a JSON string e.g. ["alias1","alias2"]
+        if (v instanceof String s && !s.isBlank() && s.startsWith("[")) {
+            String inner = s.substring(1, s.length() - 1).trim();
+            if (inner.isEmpty()) return List.of();
+            return java.util.Arrays.stream(inner.split(","))
+                .map(item -> item.trim().replaceAll("^\"|\"$", ""))
+                .filter(item -> !item.isEmpty())
+                .toList();
+        }
         return List.of();
     }
+
 
     private static KnotSession emptySession(String sessionId) {
         return new KnotSession(sessionId, sessionId, sessionId, "plsql", "", 0,

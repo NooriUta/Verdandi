@@ -18,6 +18,21 @@ function atomDisplayText(atomText: string): string {
   return idx > 0 ? atomText.substring(0, idx) : atomText;
 }
 
+// Two mutually exclusive source types:
+//   TABLE source: refTblEdge (table name)  + refColEdge  (column name)
+//   STMT  source: refStmtGeoid (stmt geoid) + refSourceName (output_col_name)
+function atomSourceType(a: KnotAtom): 'TABLE' | 'STMT' | '—' {
+  if (a.refTblEdge || a.refColEdge)       return 'TABLE';
+  if (a.refStmtGeoid || a.refSourceName)  return 'STMT';
+  return '—';
+}
+
+function atomSourceColor(type: 'TABLE' | 'STMT' | '—'): string {
+  if (type === 'TABLE') return 'var(--inf)';
+  if (type === 'STMT')  return 'var(--wrn)';
+  return 'var(--t3)';
+}
+
 export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
   const { t } = useTranslation();
 
@@ -290,11 +305,13 @@ export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
                     {[
                       '#',
                       t('knot.stmt.atomText'),
-                      t('knot.column.name'),
-                      t('knot.table.name'),
+                      t('knot.stmt.sourceType'),
+                      t('knot.stmt.sourceRef'),
+                      t('knot.stmt.refCol'),
                       'Pos',
                       t('knot.stmt.status'),
                       t('knot.stmt.context'),
+                      t('knot.stmt.outputCol'),
                       '∑ Flags',
                     ].map((h, i) => (
                       <th key={i} style={{
@@ -331,16 +348,40 @@ export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
                           fontFamily: "'Fira Code', monospace", fontSize: 10,
                           maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }} title={a.atomText}>{dispText || '—'}</td>
-                        <td style={{
-                          padding: '3px 8px', borderBottom: '1px solid var(--bd)',
-                          fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--t2)',
-                          whiteSpace: 'nowrap',
-                        }}>{a.columnName || '—'}</td>
-                        <td style={{
-                          padding: '3px 8px', borderBottom: '1px solid var(--bd)',
-                          fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--t3)',
-                          whiteSpace: 'nowrap',
-                        }}>{a.tableName || '—'}</td>
+                        {/* Тип источника: TABLE или STMT */}
+                        {(() => {
+                          const st = atomSourceType(a);
+                          return (
+                            <td style={{
+                              padding: '3px 8px', borderBottom: '1px solid var(--bd)',
+                              fontSize: 9, color: atomSourceColor(st), whiteSpace: 'nowrap',
+                              fontFamily: "'Fira Code', monospace",
+                            }}>{st}</td>
+                          );
+                        })()}
+                        {/* Источник: таблица (refTblEdge) ИЛИ запрос (refStmtGeoid) */}
+                        {(() => {
+                          const val  = a.refTblEdge || a.refStmtGeoid || '—';
+                          const col  = a.refTblEdge ? 'var(--acc)' : a.refStmtGeoid ? 'var(--wrn)' : 'var(--t3)';
+                          return (
+                            <td style={{
+                              padding: '3px 8px', borderBottom: '1px solid var(--bd)',
+                              fontFamily: "'Fira Code', monospace", fontSize: 10, color: col,
+                              maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }} title={val !== '—' ? val : undefined}>{val}</td>
+                          );
+                        })()}
+                        {/* Колонка: refColEdge (TABLE) ИЛИ refSourceName/output_col_name (STMT) */}
+                        {(() => {
+                          const val = a.refColEdge || a.refSourceName || '—';
+                          return (
+                            <td style={{
+                              padding: '3px 8px', borderBottom: '1px solid var(--bd)',
+                              fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--inf)',
+                              maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }} title={val !== '—' ? val : undefined}>{val}</td>
+                          );
+                        })()}
                         <td style={{
                           padding: '3px 8px', borderBottom: '1px solid var(--bd)',
                           fontFamily: "'Fira Code', monospace", fontSize: 9, color: 'var(--t3)',
@@ -359,6 +400,12 @@ export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
                           padding: '3px 8px', borderBottom: '1px solid var(--bd)',
                           fontSize: 10, color: 'var(--t3)', whiteSpace: 'nowrap',
                         }}>{a.atomContext || '—'}</td>
+                        {/* Вых. колонка */}
+                        <td style={{
+                          padding: '3px 8px', borderBottom: '1px solid var(--bd)',
+                          fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--t2)',
+                          whiteSpace: 'nowrap',
+                        }}>{a.outputColName || '—'}</td>
                         <td style={{ padding: '3px 8px', borderBottom: '1px solid var(--bd)' }}>
                           <div style={{ display: 'flex', gap: 2 }}>
                             {a.complex     && <FlagBadge label="∑" color="var(--wrn)"  title="Complex" />}
@@ -374,7 +421,7 @@ export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
                   })}
                   {pageAtoms.length === 0 && (
                     <tr>
-                      <td colSpan={8} style={{
+                      <td colSpan={10} style={{
                         padding: '16px', textAlign: 'center',
                         fontSize: 11, color: 'var(--t3)',
                       }}>No atoms match the current filter</td>

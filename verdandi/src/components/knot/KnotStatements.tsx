@@ -560,19 +560,6 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
   const stmtAtoms   = stmt.geoid ? maps.atomMap.get(stmt.geoid)    : undefined;
   const stmtOutCols = stmt.geoid ? maps.outColMap.get(stmt.geoid)  : undefined;
 
-  /** Map outputColumnSequence → atoms feeding that column */
-  const colAtomMap = useMemo(() => {
-    const m = new Map<number, KnotAtom[]>();
-    for (const a of stmtAtoms || []) {
-      const seq = a.outputColumnSequence;
-      if (seq != null) {
-        const list = m.get(seq) || [];
-        list.push(a);
-        m.set(seq, list);
-      }
-    }
-    return m;
-  }, [stmtAtoms]);
 
 
   return (
@@ -640,21 +627,31 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <PTblTh>{t('knot.stmt.tableGeoid')}</PTblTh>
-                <PTblTh>{t('knot.stmt.type')}</PTblTh>
+                <PTblTh>Тип</PTblTh>
+                <PTblTh>{t('knot.table.name')}</PTblTh>
+                <PTblTh>{t('knot.stmt.aliases')}</PTblTh>
+                <PTblTh>Geoid</PTblTh>
               </tr>
             </thead>
             <tbody>
-              {stmt.targetTables.map((tb, i) => (
+              {stmt.targetTables.map((ref, i) => (
                 <tr key={i}>
+                  <td style={{ ...pTblTdStyle, fontSize: 9, color: ref.nodeType === 'STMT' ? 'var(--wrn)' : 'var(--t3)', whiteSpace: 'nowrap' }}>
+                    {ref.nodeType}
+                  </td>
                   <td style={{
                     ...pTblTdStyle,
-                    borderLeft: '3px solid var(--suc)',
+                    borderLeft: `3px solid ${ref.nodeType === 'STMT' ? 'var(--wrn)' : 'var(--suc)'}`,
                     fontFamily: "'Fira Code', monospace", fontSize: 11,
                   }}>
-                    {tb}
+                    {ref.name}
                   </td>
-                  <td style={pTblTdStyle}>TABLE</td>
+                  <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--acc)' }}>
+                    {ref.aliases?.length ? ref.aliases.join(', ') : '—'}
+                  </td>
+                  <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--t3)' }}>
+                    {ref.geoid || '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -708,21 +705,32 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <PTblTh>{t('knot.stmt.tableGeoid')}</PTblTh>
-                <PTblTh>{t('knot.stmt.type')}</PTblTh>
+                <PTblTh>Тип</PTblTh>
+                <PTblTh>{t('knot.table.name')}</PTblTh>
+                <PTblTh>{t('knot.stmt.aliases')}</PTblTh>
+                <PTblTh>Geoid</PTblTh>
               </tr>
             </thead>
             <tbody>
-              {stmt.sourceTables.map((tb, i) => (
+              {stmt.sourceTables.map((ref, i) => (
                 <tr key={i}>
+                  <td style={{ ...pTblTdStyle, fontSize: 9, color: ref.nodeType === 'STMT' ? 'var(--wrn)' : 'var(--t3)', whiteSpace: 'nowrap' }}>
+                    {ref.nodeType}
+                  </td>
                   <td style={{
                     ...pTblTdStyle,
-                    borderLeft: '3px solid var(--inf)',
+                    borderLeft: `3px solid ${ref.nodeType === 'STMT' ? 'var(--wrn)' : 'var(--inf)'}`,
                     fontFamily: "'Fira Code', monospace", fontSize: 11,
                   }}>
-                    {tb}
+                    {ref.name}
                   </td>
-                  <td style={pTblTdStyle}>TABLE</td>
+                  <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--acc)' }}>
+                    {ref.aliases?.length ? ref.aliases.join(', ') : '—'}
+                  </td>
+                  <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--t3)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={ref.geoid || undefined}>
+                    {ref.geoid || '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -747,10 +755,7 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
               </thead>
               <tbody>
                 {stmtOutCols.map((col, i) => {
-                  // When SHUTTLE provides edge-based fields: only atoms with both ATOM_PRODUCES + ATOM_REF_OUTPUT_COL.
-                  // Fallback (SHUTTLE not yet rebuilt): show all atoms matched by outputColumnSequence.
-                  const srcAtoms = (colAtomMap.get(col.colOrder) || [])
-                    .filter(a => a.outputColName ? !!a.refSourceName : true);
+                  const srcAtoms = col.atoms ?? [];
                   return (
                     <tr key={i}>
                       <td style={{ ...pTblTdStyle, textAlign: 'center', width: 32, color: 'var(--t3)' }}>
@@ -765,7 +770,7 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
                       <td style={{ ...pTblTdStyle, fontSize: 11 }}>
                         {col.alias || '—'}
                       </td>
-                      {/* Source atoms: only where both ATOM_PRODUCES and ATOM_REF_OUTPUT_COL exist */}
+                      {/* Source atoms via ATOM_PRODUCES edge (pre-grouped by backend) */}
                       <td style={{ ...pTblTdStyle, padding: 0 }}>
                         {srcAtoms.length === 0 ? (
                           <span style={{ padding: '5px 8px', display: 'block', color: 'var(--t3)', fontSize: 10 }}>—</span>
@@ -777,14 +782,14 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
                                   <td style={{
                                     padding: '3px 6px', fontSize: 10,
                                     fontFamily: "'Fira Code', monospace",
-                                    borderLeft: `3px solid ${atomColor(a)}`,
+                                    borderLeft: `3px solid ${atomStatusColor(a.status)}`,
                                     maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                     color: 'var(--t1)',
-                                  }} title={a.atomText}>
-                                    {atomDisplayText(a.atomText)}
+                                  }} title={a.text}>
+                                    {atomDisplayText(a.text)}
                                   </td>
                                   <td style={{ padding: '3px 6px', fontSize: 9, color: 'var(--inf)', fontFamily: "'Fira Code', monospace", whiteSpace: 'nowrap' }}>
-                                    {a.refSourceName || a.tableName || a.columnName || '—'}
+                                    {a.col || a.tbl || '—'}
                                   </td>
                                 </tr>
                               ))}
@@ -862,10 +867,10 @@ function StmtDetailPanel({ stmt, t, maps, flatChildren, expanded, onToggle }: {
                           {a.outputColName || '—'}
                         </td>
                         <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 11, color: 'var(--acc)' }}>
-                          {a.refSourceName || '—'}
+                          {a.refColEdge || a.refSourceName || '—'}
                         </td>
-                        <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--t3)' }}>
-                          {a.tableName || a.tableGeoid || '—'}
+                        <td style={{ ...pTblTdStyle, fontFamily: "'Fira Code', monospace", fontSize: 10, color: 'var(--inf)' }}>
+                          {a.refTblEdge || a.tableName || '—'}
                         </td>
                         <td style={{ ...pTblTdStyle, fontSize: 11 }}>
                           <span style={{
@@ -1068,7 +1073,7 @@ function atomStatusColor(status: string): string {
 }
 
 function AtomsBreakdown({ stmt, t }: { stmt: KnotStatement; t: (k: string) => string }) {
-  const other = stmt.atomTotal - stmt.atomResolved - stmt.atomFailed - stmt.atomConstant;
+  const other = stmt.atomFuncCall ?? 0;
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
