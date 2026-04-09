@@ -26,7 +26,8 @@
     "level": "Level",
     "zoom": "Zoom",
     "computingLayout": "computing layout…",
-    "nodeCount": "{{count}} nodes"
+    "nodeCount": "{{count}} nodes",
+    "hasMore": "Graph truncated — showing first 500 nodes. Narrow your filter."
   },
   "breadcrumb": { "overview": "Overview" },
   "theme": { "dark": "Dark", "light": "Light" },

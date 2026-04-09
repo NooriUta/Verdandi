@@ -45,6 +45,7 @@ export interface GraphEdge {
 export interface ExploreResult {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  hasMore: boolean;
 }
 
 export interface SearchResult {
@@ -79,6 +80,7 @@ const EXPLORE = /* GraphQL */ `
     explore(scope: $scope) {
       nodes { id type label scope }
       edges { id source target type }
+      hasMore
     }
   }
 `;
@@ -88,6 +90,7 @@ const LINEAGE = /* GraphQL */ `
     lineage(nodeId: $nodeId) {
       nodes { id type label scope }
       edges { id source target type }
+      hasMore
     }
   }
 `;
@@ -97,6 +100,7 @@ const UPSTREAM = /* GraphQL */ `
     upstream(nodeId: $nodeId) {
       nodes { id type label scope }
       edges { id source target type }
+      hasMore
     }
   }
 `;
@@ -106,6 +110,7 @@ const DOWNSTREAM = /* GraphQL */ `
     downstream(nodeId: $nodeId) {
       nodes { id type label scope }
       edges { id source target type }
+      hasMore
     }
   }
 `;
@@ -115,6 +120,7 @@ const EXPAND_DEEP = /* GraphQL */ `
     expandDeep(nodeId: $nodeId, depth: $depth) {
       nodes { id type label scope }
       edges { id source target type }
+      hasMore
     }
   }
 `;
@@ -124,6 +130,7 @@ const STMT_COLUMNS = /* GraphQL */ `
     stmtColumns(ids: $ids) {
       nodes { id type label scope }
       edges { id source target type }
+      hasMore
     }
   }
 `;
@@ -193,7 +200,7 @@ export async function fetchExpandDeep(nodeId: string, depth: number): Promise<Ex
 }
 
 export async function fetchStmtColumns(ids: string[]): Promise<ExploreResult> {
-  if (ids.length === 0) return { nodes: [], edges: [] };
+  if (ids.length === 0) return { nodes: [], edges: [], hasMore: false };
   const data = await gqlClient.request<{ stmtColumns: ExploreResult }>(STMT_COLUMNS, { ids });
   return data.stmtColumns;
 }

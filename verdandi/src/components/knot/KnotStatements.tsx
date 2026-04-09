@@ -1,6 +1,7 @@
 import { memo, useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { KnotStatement, KnotSnippet, KnotAtom, KnotOutputColumn, KnotAffectedColumn } from '../../services/lineage';
+import { ToolbarSelect } from '../ui/ToolbarPrimitives';
 
 /** All lookup maps passed through the component tree */
 type LookupMaps = {
@@ -184,20 +185,11 @@ export const KnotStatements = memo(({ statements, snippets, atoms, outputColumns
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
       }}>
         <span style={{ fontSize: 11, color: 'var(--t3)' }}>{t('knot.stmt.routine')}:</span>
-        <select
+        <ToolbarSelect
           value={selectedRoutine}
-          onChange={e => setSelectedRoutine(e.target.value)}
-          style={{
-            background: 'var(--bg2)', border: '1px solid var(--bd)',
-            color: 'var(--t1)', padding: '5px 8px', borderRadius: 5,
-            fontSize: 12, outline: 'none', fontFamily: "'DM Sans', sans-serif",
-            cursor: 'pointer',
-          }}
-        >
-          {routines.map(r => (
-            <option key={r} value={r}>{r === 'ALL' ? t('knot.stmt.allRoutines') : r}</option>
-          ))}
-        </select>
+          onChange={setSelectedRoutine}
+          options={routines.map(r => ({ value: r, label: r === 'ALL' ? t('knot.stmt.allRoutines') : r }))}
+        />
         <span style={{
           padding: '3px 8px', borderRadius: 3,
           background: 'var(--bg3)', border: '1px solid var(--bd)',

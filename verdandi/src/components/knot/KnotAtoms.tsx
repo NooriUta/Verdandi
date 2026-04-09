@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { KnotSession, KnotAtom } from '../../services/lineage';
+import { ToolbarFilterBar, ToolbarInput, ToolbarCount, PageButton } from '../ui/ToolbarPrimitives';
 
 interface Props {
   session: KnotSession;
@@ -250,51 +251,34 @@ export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
 
             {/* Filter toolbar */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              {/* Search */}
-              <input
-                type="text"
-                placeholder={t('knot.atoms.searchPlaceholder')}
+              <ToolbarInput
                 value={searchText}
-                onChange={e => setSearchText(e.target.value)}
-                style={{
-                  padding: '4px 10px', borderRadius: 4, fontSize: 11,
-                  border: '1px solid var(--bd)', background: 'var(--bg3)',
-                  color: 'var(--t1)', outline: 'none', flex: '1 1 160px', minWidth: 120,
-                  fontFamily: 'inherit',
-                }}
+                onChange={setSearchText}
+                placeholder={t('knot.atoms.searchPlaceholder')}
               />
-
-              {/* Status filter */}
-              <FilterBar
-                label="Status"
+              <ToolbarFilterBar
                 options={[
                   { value: 'all',           label: 'All' },
                   { value: 'resolved',      label: 'Resolved' },
                   { value: 'failed',        label: 'Failed',   color: 'var(--dan, #C06060)' },
                   { value: 'constant',      label: 'Const' },
                   { value: 'function_call', label: 'Func' },
-                ]}
+                ] as { value: StatusFilter; label: string; color?: string }[]}
                 value={statusFilter}
-                onChange={v => setStatusFilter(v as StatusFilter)}
+                onChange={setStatusFilter}
               />
-
-              {/* Flag filter */}
-              <FilterBar
-                label="Flag"
+              <ToolbarFilterBar
                 options={[
                   { value: 'all',        label: 'All' },
                   { value: 'complex',    label: '∑ Complex' },
-                  { value: 'param',      label: 'P Param',     color: 'var(--inf)' },
-                  { value: 'var',        label: 'V Var',        color: 'var(--wrn)' },
-                  { value: 'unattached', label: 'Unattached',   color: 'var(--wrn)' },
-                ]}
+                  { value: 'param',      label: 'P Param',   color: 'var(--inf)' },
+                  { value: 'var',        label: 'V Var',     color: 'var(--wrn)' },
+                  { value: 'unattached', label: 'Unattached',color: 'var(--wrn)' },
+                ] as { value: FlagFilter; label: string; color?: string }[]}
                 value={flagFilter}
-                onChange={v => setFlagFilter(v as FlagFilter)}
+                onChange={setFlagFilter}
               />
-
-              <span style={{ fontSize: 10, color: 'var(--t3)', whiteSpace: 'nowrap' }}>
-                {filteredAtoms.length.toLocaleString()} / {atoms.length.toLocaleString()}
-              </span>
+              <ToolbarCount filtered={filteredAtoms.length} total={atoms.length} />
             </div>
 
             {/* Table */}
@@ -433,15 +417,10 @@ export const KnotAtoms = memo(({ session: s, atoms }: Props) => {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                marginTop: 10, justifyContent: 'center',
-              }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, justifyContent: 'center' }}>
                 <PageButton disabled={page === 0} onClick={() => setPage(0)}>«</PageButton>
                 <PageButton disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹</PageButton>
-                <span style={{ fontSize: 11, color: 'var(--t2)' }}>
-                  {page + 1} / {totalPages}
-                </span>
+                <span style={{ fontSize: 11, color: 'var(--t2)' }}>{page + 1} / {totalPages}</span>
                 <PageButton disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>›</PageButton>
                 <PageButton disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</PageButton>
               </div>
@@ -457,56 +436,6 @@ KnotAtoms.displayName = 'KnotAtoms';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function FilterBar<T extends string>({
-  options, value, onChange,
-}: {
-  label: string;
-  options: { value: T; label: string; color?: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div style={{ display: 'flex', gap: 2 }}>
-      {options.map(opt => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          style={{
-            padding: '3px 8px', borderRadius: 4, fontSize: 10,
-            border: '1px solid var(--bd)', cursor: 'pointer',
-            fontFamily: 'inherit',
-            background: value === opt.value ? 'var(--acc)' : 'var(--bg3)',
-            color: value === opt.value ? 'var(--bg0)' : (opt.color || 'var(--t2)'),
-            transition: 'background 0.1s',
-          }}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function PageButton({
-  disabled, onClick, children,
-}: {
-  disabled: boolean; onClick: () => void; children: React.ReactNode;
-}) {
-  return (
-    <button
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        padding: '2px 8px', borderRadius: 4, fontSize: 12,
-        border: '1px solid var(--bd)', cursor: disabled ? 'default' : 'pointer',
-        background: 'var(--bg3)', color: disabled ? 'var(--t3)' : 'var(--t1)',
-        fontFamily: 'inherit',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
 
 function FlagBadge({ label, color, title }: { label: string; color: string; title: string }) {
   return (
