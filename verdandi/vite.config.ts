@@ -33,10 +33,10 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',  // bind to IPv4 so browsers can reach it
-    // Dev proxy: forward /graphql → SHUTTLE on 8080 (bypasses rbac-proxy which isn't running locally)
+    // Dev proxy: forward all API routes through Chur (BFF) on :3000
     proxy: {
       '/graphql': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:3000',
         changeOrigin: true,
       },
       '/auth': {
