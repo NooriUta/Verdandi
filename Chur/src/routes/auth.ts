@@ -1,10 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { verifyUser } from '../users';
-import { config } from '../config';
+import { exchangeCredentials, extractUserInfo, keycloakLogout } from '../keycloak';
+import { createSession, deleteSession, ensureValidSession } from '../sessions';
 
 // ── In-memory rate limiter for /auth/login ────────────────────────────────────
-// 5 attempts per IP within a 15-minute window (production).
-// In dev mode: 50 attempts / 1 min — lenient enough not to block development.
 const IS_PROD      = process.env.NODE_ENV === 'production';
 const RATE_MAX     = IS_PROD ? 5  : 50;
 const RATE_WINDOW  = IS_PROD ? 15 * 60 * 1000 : 60 * 1000;
@@ -21,7 +19,6 @@ function isRateLimited(ip: string): boolean {
   return entry.count > RATE_MAX;
 }
 
-// Sweep stale entries every 5 minutes to prevent memory leaks.
 setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of loginAttempts) {
@@ -29,14 +26,13 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref();
 
+// ── Cookie config ─────────────────────────────────────────────────────────────
 const COOKIE_OPTS = {
   httpOnly: true,
   path:     '/',
-  // 'lax' allows cross-port requests on localhost (5173 → 3000 in dev).
-  // 'strict' blocks the cookie entirely when origin differs from request host.
-  sameSite: (process.env.NODE_ENV === 'production' ? 'strict' : 'lax') as 'strict' | 'lax',
-  secure:   process.env.NODE_ENV === 'production',
-  maxAge:   8 * 60 * 60, // 8 h in seconds
+  sameSite: (IS_PROD ? 'strict' : 'lax') as 'strict' | 'lax',
+  secure:   IS_PROD,
+  maxAge:   8 * 60 * 60, // 8 h
 };
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
@@ -56,28 +52,39 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (request, reply) => {
-      // ── Rate limit check ────────────────────────────────────────────────
       const ip = request.ip;
       if (isRateLimited(ip)) {
         return reply.status(429).send({
-          error: 'Too many login attempts. Try again in 15 minutes.',
+          error: 'Too many login attempts. Try again later.',
         });
       }
 
       const { username, password } = request.body;
 
-      const user = await verifyUser(username, password).catch(() => null);
-      if (!user) {
+      let tokens;
+      try {
+        tokens = await exchangeCredentials(username, password);
+      } catch {
         return reply.status(401).send({ error: 'Invalid credentials' });
       }
 
-      const token = app.jwt.sign(
-        { sub: user.id, username: user.username, role: user.role },
-        { expiresIn: config.jwtExpiry },
+      // Decode access token payload to extract user info
+      const payload = JSON.parse(
+        Buffer.from(tokens.access_token.split('.')[1], 'base64url').toString(),
+      );
+      const userInfo = extractUserInfo(payload);
+
+      const sid = createSession(
+        tokens.access_token,
+        tokens.refresh_token,
+        tokens.expires_in,
+        userInfo.sub,
+        userInfo.username,
+        userInfo.role,
       );
 
-      reply.setCookie('token', token, COOKIE_OPTS);
-      return { id: user.id, username: user.username, role: user.role };
+      reply.setCookie('sid', sid, COOKIE_OPTS);
+      return { id: userInfo.sub, username: userInfo.username, role: userInfo.role };
     },
   );
 
@@ -92,25 +99,28 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── POST /auth/refresh ──────────────────────────────────────────────────────
-  // Silent token renewal: if the current JWT is still valid, issue a fresh one.
-  // The frontend calls this periodically before the 8h token expires.
+  // Kept for backward compatibility. With Keycloak, lazy refresh in
+  // app.authenticate handles this transparently, but the frontend may still
+  // call /refresh explicitly.
   app.post(
     '/refresh',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
       const { sub, username, role } = request.user;
-      const token = app.jwt.sign(
-        { sub, username, role },
-        { expiresIn: config.jwtExpiry },
-      );
-      reply.setCookie('token', token, COOKIE_OPTS);
+      // Session was already refreshed by authenticate if needed
       return { id: sub, username, role };
     },
   );
 
   // ── POST /auth/logout ───────────────────────────────────────────────────────
-  app.post('/logout', async (_request, reply) => {
-    reply.clearCookie('token', { path: '/' });
+  app.post('/logout', async (request, reply) => {
+    const sid = request.cookies.sid;
+    if (sid) {
+      const session = deleteSession(sid);
+      // Invalidate refresh token in Keycloak (fire-and-forget)
+      if (session) keycloakLogout(session.refreshToken);
+    }
+    reply.clearCookie('sid', { path: '/' });
     return { ok: true };
   });
 };

@@ -71,6 +71,7 @@ export interface SchemaEntry {
 
 // ─── Base node data (all nodes share this) ───────────────────────────────────
 export interface DaliNodeData {
+  [key: string]: unknown;          // index sig required by @xyflow/react Node
   label: string;
   nodeType: DaliNodeType;
   childrenAvailable: boolean;

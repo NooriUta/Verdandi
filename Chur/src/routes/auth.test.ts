@@ -1,32 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import jwt from '@fastify/jwt';
 import { authRoutes } from './auth';
+import * as sessions from '../sessions';
 
-// ── Mock verifyUser so no ArcadeDB is needed ──────────────────────────────────
-vi.mock('../users', () => ({
-  verifyUser: vi.fn(),
+// ── Mock keycloak.ts ─────────────────────────────────────────────────────────
+vi.mock('../keycloak', () => ({
+  exchangeCredentials: vi.fn(),
+  extractUserInfo:     vi.fn(),
+  keycloakLogout:      vi.fn(),
 }));
 
-import { verifyUser } from '../users';
-const mockVerifyUser = vi.mocked(verifyUser);
+import { exchangeCredentials, extractUserInfo } from '../keycloak';
+const mockExchange  = vi.mocked(exchangeCredentials);
+const mockExtract   = vi.mocked(extractUserInfo);
 
-// ── Minimal Fastify app factory ───────────────────────────────────────────────
+// ── Minimal Fastify app factory ──────────────────────────────────────────────
 async function buildApp() {
   const app = Fastify({ logger: false });
   await app.register(cookie);
-  await app.register(jwt, {
-    secret: 'test-secret',
-    cookie: { cookieName: 'token', signed: false },
-  });
 
   // Minimal authenticate decorator (mirrors rbac plugin)
   app.decorate('authenticate', async (request: any, reply: any) => {
+    const sid = request.cookies.sid;
+    if (!sid) return reply.status(401).send({ error: 'Unauthorized' });
     try {
-      await request.jwtVerify({ onlyCookie: true });
+      const session = await sessions.ensureValidSession(sid);
+      request.user = { sub: session.sub, username: session.username, role: session.role };
     } catch {
-      reply.status(401).send({ error: 'Unauthorized' });
+      return reply.status(401).send({ error: 'Unauthorized' });
     }
   });
 
@@ -35,7 +37,18 @@ async function buildApp() {
   return app;
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Fake Keycloak access token payload (base64url-encoded JSON). */
+function fakeAccessToken(claims: Record<string, unknown>): string {
+  const header  = Buffer.from('{"alg":"RS256"}').toString('base64url');
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  return `${header}.${payload}.fakesig`;
+}
+
+const ADMIN_CLAIMS = { sub: 'kc-001', preferred_username: 'admin', seer_roles: ['admin'] };
+
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('POST /auth/login', () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
@@ -46,24 +59,31 @@ describe('POST /auth/login', () => {
   });
 
   it('returns 200 with user data on valid credentials', async () => {
-    mockVerifyUser.mockResolvedValue({ id: '#1:0', username: 'admin', role: 'admin' });
+    mockExchange.mockResolvedValue({
+      access_token:  fakeAccessToken(ADMIN_CLAIMS),
+      refresh_token: 'rt-123',
+      expires_in:    300,
+      token_type:    'Bearer',
+    });
+    mockExtract.mockReturnValue({ sub: 'kc-001', username: 'admin', role: 'admin' });
 
     const res = await app.inject({
       method: 'POST',
       url: '/auth/login',
-      payload: { username: 'admin', password: 'secret' },
+      payload: { username: 'admin', password: 'admin' },
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.username).toBe('admin');
     expect(body.role).toBe('admin');
-    // Cookie must be set
-    expect(res.headers['set-cookie']).toMatch(/token=/);
+    expect(body.id).toBe('kc-001');
+    // Session cookie must be set
+    expect(res.headers['set-cookie']).toMatch(/sid=/);
   });
 
   it('returns 401 on invalid credentials', async () => {
-    mockVerifyUser.mockResolvedValue(null);
+    mockExchange.mockRejectedValue(new Error('Keycloak login failed'));
 
     const res = await app.inject({
       method: 'POST',
@@ -95,39 +115,15 @@ describe('POST /auth/login', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('returns 429 after exceeding rate limit', async () => {
-    // verifyUser resolves to null (wrong password) — we want rate-limit to trigger
-    mockVerifyUser.mockResolvedValue(null);
-
-    // Exhaust the dev limit (50 attempts). Use a unique IP to avoid
-    // state from other tests (Fastify inject uses '127.0.0.1' by default).
-    // We override the IP via the x-forwarded-for header if needed — but since
-    // rate limit state is module-level, a unique IP suffix works better.
-    // Here we just check that the 429 route path is reachable by overriding
-    // NODE_ENV to 'production' for this test, which sets RATE_MAX=5.
-    const prodApp = Fastify({ logger: false });
-    const origEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
-
-    // Re-import auth after env change — use a dynamic import to pick up the
-    // new constants. Since vitest caches modules, we clear the cache instead.
-    // Simplest approach: call login 6 times with same IP, check 6th is 429.
-    // NOTE: module-level state means we need a fresh process — we test the
-    // logic indirectly by injecting x-forwarded-for with a fresh IP per run
-    // and relying on the production constants being set in CI.
-    // For portability, test against dev limit (50) by just asserting response shape.
-
-    process.env.NODE_ENV = origEnv;
-
-    // Assert 429 response shape when rate-limited (tested via the error message)
-    const rateLimitBody = { error: 'Too many login attempts. Try again in 15 minutes.' };
-    // Direct structural check — the 429 payload must contain a meaningful message.
+  it('rate limit error message contains "Too many"', () => {
+    // Structural check — the 429 payload shape
+    const rateLimitBody = { error: 'Too many login attempts. Try again later.' };
     expect(rateLimitBody.error).toContain('Too many');
   });
 });
 
 describe('POST /auth/logout', () => {
-  it('clears the token cookie', async () => {
+  it('clears the sid cookie', async () => {
     const app = await buildApp();
 
     const res = await app.inject({
@@ -137,7 +133,7 @@ describe('POST /auth/logout', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().ok).toBe(true);
-    expect(res.headers['set-cookie']).toMatch(/token=;/);
+    expect(res.headers['set-cookie']).toMatch(/sid=;/);
   });
 });
 
@@ -153,21 +149,29 @@ describe('GET /auth/me', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('returns user info with a valid JWT cookie', async () => {
+  it('returns user info with a valid session cookie', async () => {
     const app = await buildApp();
 
-    // Sign a token manually
-    const token = app.jwt.sign({ sub: '#1:0', username: 'alice', role: 'viewer' });
+    // Create a session directly in the store
+    const sid = sessions.createSession(
+      'fake-access-token',
+      'fake-refresh-token',
+      3600,
+      'kc-002',
+      'alice',
+      'viewer',
+    );
 
     const res = await app.inject({
       method: 'GET',
       url: '/auth/me',
-      cookies: { token },
+      cookies: { sid },
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.username).toBe('alice');
     expect(body.role).toBe('viewer');
+    expect(body.id).toBe('kc-002');
   });
 });
