@@ -1,6 +1,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import type { UserRole } from '../types';
+import { ensureValidSession } from '../sessions';
 
 /** SQL/Cypher write-operation detector. */
 export function isWriteQuery(command: string): boolean {
@@ -21,30 +22,51 @@ function hasMinRole(userRole: UserRole, minRole: UserRole): boolean {
 }
 
 /**
- * preHandler: verify JWT from cookie, attach user to request.
- * Use as `preHandler: [app.authenticate]` on protected routes.
+ * RBAC plugin — session-based authentication via Keycloak BFF.
+ *
+ * `app.authenticate`: reads "sid" cookie → looks up in-memory session →
+ * lazy-refreshes access token if expired → attaches user to request.
+ *
+ * `app.authorizeQuery`: authenticate + write-permission check.
  */
 const rbacPlugin: FastifyPluginAsync = async (app) => {
   app.decorate(
     'authenticate',
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const sid = request.cookies.sid;
+      if (!sid) {
+        return reply.status(401).send({ error: 'Unauthorized' });
+      }
+
       try {
-        await request.jwtVerify({ onlyCookie: true });
+        const session = await ensureValidSession(sid);
+        // Attach user info to request (same shape as before for graphql.ts compatibility)
+        request.user = {
+          sub:      session.sub,
+          username: session.username,
+          role:     session.role,
+        };
       } catch {
-        reply.status(401).send({ error: 'Unauthorized' });
+        return reply.status(401).send({ error: 'Unauthorized' });
       }
     },
   );
 
-  /**
-   * Guard that combines authenticate + write-permission check.
-   * Pass `command` in the request body; role is taken from the JWT.
-   */
   app.decorate(
     'authorizeQuery',
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const sid = request.cookies.sid;
+      if (!sid) {
+        return reply.status(401).send({ error: 'Unauthorized' });
+      }
+
       try {
-        await request.jwtVerify({ onlyCookie: true });
+        const session = await ensureValidSession(sid);
+        request.user = {
+          sub:      session.sub,
+          username: session.username,
+          role:     session.role,
+        };
       } catch {
         return reply.status(401).send({ error: 'Unauthorized' });
       }

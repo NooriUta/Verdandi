@@ -1,8 +1,7 @@
-import './types'; // load JWT payload type augmentation
+import './types'; // load Fastify request augmentation
 
 import Fastify from 'fastify';
 import cookie  from '@fastify/cookie';
-import jwt     from '@fastify/jwt';
 
 import { config }         from './config';
 import rbacPlugin         from './plugins/rbac';
@@ -24,7 +23,6 @@ async function start(): Promise<void> {
   // ── Plugins ─────────────────────────────────────────────────────────────────
 
   // Manual CORS (avoids @fastify/cors Fastify-version mismatch in dev)
-  // corsOrigin is a string (single origin) or comma-separated list in env.
   const allowedOrigins = new Set(
     (typeof config.corsOrigin === 'string' ? config.corsOrigin : '')
       .split(',')
@@ -34,7 +32,6 @@ async function start(): Promise<void> {
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
-    // Only reflect the origin if it's in the allow-list; otherwise block.
     const allowed = origin ? allowedOrigins.has(origin) : false;
     reply.header('Access-Control-Allow-Origin',      allowed ? origin! : 'null');
     reply.header('Access-Control-Allow-Credentials', 'true');
@@ -45,11 +42,8 @@ async function start(): Promise<void> {
     }
   });
 
-  await app.register(cookie);
-
-  await app.register(jwt, {
-    secret: config.jwtSecret,
-    cookie: { cookieName: 'token', signed: false },
+  await app.register(cookie, {
+    secret: config.cookieSecret, // sign session cookies
   });
 
   await app.register(rbacPlugin);
