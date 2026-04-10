@@ -65,23 +65,5 @@ jobs:
       - run: ./gradlew test
       - run: ./gradlew build -x test
 
-  # ── E2E: Playwright (needs verdandi + Chur running) ─────────────────────────
-  e2e:
-    name: E2E — Playwright
-    runs-on: ubuntu-latest
-    needs: [verdandi, chur]
-    defaults:
-      run:
-        working-directory: verdandi
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: verdandi/package-lock.json
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
-        env:
-          CI: true
+  # E2E (Playwright) requires the full Docker Compose stack.
+  # Run locally: docker compose up -d && cd verdandi && npm run e2e
