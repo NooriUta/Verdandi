@@ -1,5 +1,5 @@
 {
-  "app": { "title": "SEER Studio", "tagline": "Data Lineage Explorer" },
+  "app": { "title": "SEER Studio", "tagline": "Make invisible data dependencies visible." },
   "nav": {
     "loom": "LOOM",
     "knot": "KNOT",

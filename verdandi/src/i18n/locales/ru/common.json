@@ -1,5 +1,5 @@
 {
-  "app": { "title": "SEER Studio", "tagline": "Визуализатор линейки данных" },
+  "app": { "title": "SEER Studio", "tagline": "Сделать невидимые зависимости данных видимыми." },
   "nav": {
     "loom": "LOOM",
     "knot": "KNOT",

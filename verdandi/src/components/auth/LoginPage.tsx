@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useTranslation } from 'react-i18next';
-import { Network, LogIn } from 'lucide-react';
+import { LogIn } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 
 const schema = z.object({
@@ -52,15 +52,17 @@ export function LoginPage() {
       }}>
         {/* Logo */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-          {/* Icon — amber-tinted */}
+          {/* Seiðr lettermark — amber square with S */}
           <div style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             width: '44px', height: '44px',
-            borderRadius: 'var(--seer-radius-md)',
-            background: 'color-mix(in srgb, var(--acc) 12%, var(--bg2))',
-            border: '1px solid color-mix(in srgb, var(--acc) 35%, var(--bd))',
+            borderRadius: '4px',
+            background: 'var(--acc)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
           }}>
-            <Network size={20} color="var(--acc)" strokeWidth={1.5} />
+            <span className="seer-logo-text" style={{ fontSize: '24px', color: 'var(--bg0)', lineHeight: 1 }}>
+              S
+            </span>
           </div>
 
           {/* Wordmark: • SEER Studio */}
@@ -79,9 +81,9 @@ export function LoginPage() {
             {t('app.tagline')}
           </div>
 
-          {/* Module identifier — mono */}
+          {/* Three Norns — mono */}
           <div className="mono" style={{ fontSize: '10px', color: 'var(--t3)', letterSpacing: '0.07em', opacity: 0.7 }}>
-            VERDANDI · LOOM
+            VERDANDI · URD · SKULD
           </div>
         </div>
 
