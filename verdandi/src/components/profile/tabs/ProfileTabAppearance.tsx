@@ -73,7 +73,7 @@ export const ProfileTabAppearance = memo(() => {
             key={th}
             onClick={() => { if (theme !== th) toggleTheme(); }}
             style={{
-              flex: 1, padding: '10px 0', borderRadius: '6px',
+              flex: 1, padding: '10px 0', borderRadius: 'var(--seer-radius-md)',
               border: `1.5px solid ${theme === th ? 'var(--acc)' : 'var(--bd)'}`,
               cursor: 'pointer',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
@@ -84,7 +84,7 @@ export const ProfileTabAppearance = memo(() => {
             }}
           >
             <div style={{
-              width: '40px', height: '26px', borderRadius: '4px',
+              width: '40px', height: '26px', borderRadius: 'var(--seer-radius-sm)',
               border: '1px solid var(--bd)', overflow: 'hidden',
               display: 'flex', flexDirection: 'column',
             }}>
@@ -104,7 +104,7 @@ export const ProfileTabAppearance = memo(() => {
             key={p.id}
             onClick={() => setPalette(p.id)}
             style={{
-              borderRadius: '6px',
+              borderRadius: 'var(--seer-radius-md)',
               border: `1.5px solid ${palette === p.id ? 'var(--acc)' : 'var(--bd)'}`,
               cursor: 'pointer', overflow: 'hidden', position: 'relative',
               transition: 'border-color 0.12s',
@@ -133,7 +133,7 @@ export const ProfileTabAppearance = memo(() => {
             key={f.id}
             onClick={() => setUiFont(f.id)}
             style={{
-              padding: '10px 12px', borderRadius: '6px',
+              padding: '10px 12px', borderRadius: 'var(--seer-radius-md)',
               border: `1.5px solid ${uiFont === f.id ? 'var(--acc)' : 'var(--bd)'}`,
               cursor: 'pointer',
               background: uiFont === f.id ? 'color-mix(in srgb, var(--acc) 6%, var(--bg2))' : 'var(--bg2)',
@@ -159,7 +159,7 @@ export const ProfileTabAppearance = memo(() => {
             key={f.id}
             onClick={() => setMonoFont(f.id)}
             style={{
-              padding: '10px 12px', borderRadius: '6px',
+              padding: '10px 12px', borderRadius: 'var(--seer-radius-md)',
               border: `1.5px solid ${monoFont === f.id ? 'var(--acc)' : 'var(--bd)'}`,
               cursor: 'pointer',
               background: monoFont === f.id ? 'color-mix(in srgb, var(--acc) 6%, var(--bg2))' : 'var(--bg2)',
@@ -177,7 +177,7 @@ export const ProfileTabAppearance = memo(() => {
 
       {/* Font preview */}
       <FieldLabel style={{ marginBottom: '8px' }}>{t('profile.appearance.preview')}</FieldLabel>
-      <div style={{ padding: '12px 14px', background: 'var(--bg0)', border: '1px solid var(--bd)', borderRadius: '6px', marginBottom: '24px' }}>
+      <div style={{ padding: '12px 14px', background: 'var(--bg0)', border: '1px solid var(--bd)', borderRadius: 'var(--seer-radius-md)', marginBottom: '24px' }}>
         <div style={{ fontSize: '10px', color: 'var(--t3)', marginBottom: '4px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>UI — node title</div>
         <div style={{ fontSize: `${fontSize}px`, fontWeight: 500, color: 'var(--t1)', marginBottom: '8px' }}>
           orders · public · 14 columns
@@ -209,7 +209,7 @@ export const ProfileTabAppearance = memo(() => {
             key={d}
             onClick={() => setDensity(d)}
             style={{
-              flex: 1, padding: '8px 0', borderRadius: '6px',
+              flex: 1, padding: '8px 0', borderRadius: 'var(--seer-radius-md)',
               border: `1.5px solid ${density === d ? 'var(--acc)' : 'var(--bd)'}`,
               cursor: 'pointer', fontFamily: 'inherit',
               background: density === d ? 'color-mix(in srgb, var(--acc) 8%, var(--bg2))' : 'var(--bg2)',

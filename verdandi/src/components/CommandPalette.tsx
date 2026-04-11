@@ -181,7 +181,7 @@ export const CommandPalette = memo(({ open, onClose }: CommandPaletteProps) => {
           width: '100%', maxWidth: 480,
           background: 'var(--bg1)',
           border: '1px solid var(--bd)',
-          borderRadius: '12px',
+          borderRadius: 'var(--seer-radius-xl)',
           boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
           overflow: 'hidden',
           display: 'flex', flexDirection: 'column',

@@ -63,7 +63,7 @@ export function LoginPage() {
           {/* Seiðr lettermark — amber square with S */}
           <div style={{
             width: '44px', height: '44px',
-            borderRadius: '4px',
+            borderRadius: 'var(--seer-radius-sm)',
             background: 'var(--acc)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,

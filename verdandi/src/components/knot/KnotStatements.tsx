@@ -1115,7 +1115,7 @@ function SqlBlock({ sql }: { sql: string }) {
           padding: '3px 8px', fontSize: 10,
           background: copied ? 'var(--suc)' : 'var(--bg3)',
           border: '1px solid var(--bd)', borderRadius: 4,
-          color: copied ? '#fff' : 'var(--t3)',
+          color: copied ? 'var(--bg0)' : 'var(--t3)',
           cursor: 'pointer', fontFamily: 'inherit',
           transition: 'background 0.15s, color 0.15s',
           zIndex: 1,

@@ -273,7 +273,7 @@ export const SearchPalette = memo(({ open, onClose }: SearchPaletteProps) => {
           maxHeight: '70vh',
           background: 'var(--bg1)',
           border: '1px solid var(--bd)',
-          borderRadius: '12px',
+          borderRadius: 'var(--seer-radius-xl)',
           boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
           overflow: 'hidden',
           display: 'flex', flexDirection: 'column',
@@ -335,7 +335,7 @@ export const SearchPalette = memo(({ open, onClose }: SearchPaletteProps) => {
                 style={{
                   padding: '3px 10px',
                   fontSize: '10px', fontWeight: 500,
-                  borderRadius: '4px',
+                  borderRadius: 'var(--seer-radius-sm)',
                   border: '1px solid',
                   borderColor: isActive ? 'var(--acc)' : 'var(--bd)',
                   background: isActive
