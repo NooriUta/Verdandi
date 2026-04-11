@@ -51,32 +51,45 @@ export function LoginPage() {
         gap: '32px',
       }}>
         {/* Logo */}
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+          {/* Icon — amber-tinted */}
           <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '48px',
-            height: '48px',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: '44px', height: '44px',
             borderRadius: 'var(--seer-radius-md)',
-            background: 'var(--bg2)',
-            border: '1px solid var(--bd)',
-            marginBottom: '16px',
+            background: 'color-mix(in srgb, var(--acc) 12%, var(--bg2))',
+            border: '1px solid color-mix(in srgb, var(--acc) 35%, var(--bd))',
           }}>
-            <Network size={22} color="var(--acc)" strokeWidth={1.5} />
+            <Network size={20} color="var(--acc)" strokeWidth={1.5} />
           </div>
-          <div style={{ fontSize: '20px', fontWeight: 600, color: 'var(--t1)', letterSpacing: '0.06em' }}>
-            {t('app.title')}
+
+          {/* Wordmark: • SEER Studio */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--acc)', flexShrink: 0, alignSelf: 'center' }} />
+            <span className="seer-logo-text" style={{ fontSize: '26px', color: 'var(--t1)' }}>
+              SEER
+            </span>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--t2)', letterSpacing: '0.06em' }}>
+              Studio
+            </span>
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--t3)', marginTop: '4px', letterSpacing: '0.04em' }}>
+
+          {/* Tagline */}
+          <div style={{ fontSize: '11px', color: 'var(--t3)', letterSpacing: '0.04em' }}>
+            {t('app.tagline')}
+          </div>
+
+          {/* Module identifier — mono */}
+          <div className="mono" style={{ fontSize: '10px', color: 'var(--t3)', letterSpacing: '0.07em', opacity: 0.7 }}>
             VERDANDI · LOOM
           </div>
         </div>
 
-        {/* Card */}
+        {/* Card — amber accent top border */}
         <div style={{
           background: 'var(--bg1)',
           border: '1px solid var(--bd)',
+          borderTop: '2px solid var(--acc)',
           borderRadius: 'var(--seer-radius-lg)',
           padding: '28px',
           display: 'flex',
