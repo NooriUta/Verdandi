@@ -29,7 +29,7 @@ export const ProfileTabTokens = memo(() => {
           {t('profile.tokens.apiTokenDesc')}
         </p>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
-          <div style={{ flex: 1, padding: '7px 10px', background: 'var(--bg0)', border: '1px solid var(--bd)', borderRadius: '6px', fontFamily: 'var(--mono, monospace)', fontSize: '12px', color: 'var(--t2)', letterSpacing: '0.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ flex: 1, padding: '7px 10px', background: 'var(--bg0)', border: '1px solid var(--bd)', borderRadius: '6px', fontFamily: 'var(--mono)', fontSize: '12px', color: 'var(--t2)', letterSpacing: '0.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {visible ? MOCK_TOKEN : MASKED}
           </div>
           <button onClick={() => setVisible((v) => !v)} style={btnSm}>{visible ? t('profile.tokens.hide') : t('profile.tokens.show')}</button>

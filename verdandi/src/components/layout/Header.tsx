@@ -97,7 +97,7 @@ export const Header = memo(() => {
 
   return (
     <header style={{
-      height: '48px',
+      height: '42px',
       background: 'var(--bg0)',
       borderBottom: '1px solid var(--bd)',
       display: 'flex',

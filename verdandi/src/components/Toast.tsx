@@ -90,7 +90,7 @@ function ToastItem({ entry }: { entry: ToastEntry }) {
         padding: '10px 16px',
         background: s.bg,
         border: `1px solid ${s.border}`,
-        borderRadius: 'var(--seer-radius-md, 6px)',
+        borderRadius: 'var(--seer-radius-md)',
         boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
         color: 'var(--t1, #ddd)',
         fontSize: 12, letterSpacing: '0.03em',

@@ -79,7 +79,7 @@ export const ProfileTabShortcuts = memo(() => {
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       minWidth: '22px', height: '20px', padding: '0 5px',
                       background: 'var(--bg3)', border: '1px solid var(--bdh)',
-                      borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--mono, monospace)',
+                      borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--mono)',
                       color: 'var(--t2)', boxShadow: '0 1px 0 var(--bdh)',
                     }}>
                       {k}

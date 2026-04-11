@@ -66,7 +66,7 @@ export const InspectorSchema = memo(({ data, nodeId }: Props) => {
             style={{
               width: '100%', padding: '5px 10px',
               background: 'var(--acc)', border: 'none',
-              borderRadius: 'var(--seer-radius-sm, 4px)',
+              borderRadius: 'var(--seer-radius-sm)',
               color: 'var(--bg0)', fontSize: '11px', fontWeight: 600,
               cursor: 'pointer', letterSpacing: '0.04em',
             }}
