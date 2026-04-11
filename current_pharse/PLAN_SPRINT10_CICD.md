@@ -4,6 +4,33 @@ Date: 11–18 апреля 2026
 
 ---
 
+## Статус реализации (11 апр 2026)
+
+### Сделано
+- `.github/workflows/cd.yml` — build + push to GHCR + SSH deploy + health-check + Telegram notify
+- `docker-compose.prod.yml` — prod compose с `image:` refs, healthcheck на всех сервисах
+- `scripts/rollback.sh` — откат по SHA
+- `verdandi/vite.config.ts` — coverage thresholds (lines 70%, functions 70%, branches 60%)
+- `verdandi/package.json` — скрипт `test:coverage`
+- `.github/workflows/ci.yml` — добавлен шаг `test:coverage`
+- GitHub Environment `production` создан
+- `@vitest/coverage-v8` установлен
+- Coverage локально: Lines 77.9%, Functions 71.6%, Branches 65.7% — всё зелёно
+
+### Отложено → Sprint 10.5 / Sprint 11
+- **Поднятие хостинга** — нужны GitHub Secrets (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, `GHCR_TOKEN`)
+  и настройка сервера (Docker, SSH-ключ). Инструкция готова: `internal_docs/instructions/CICD_SETUP.md`
+- **E2E в CI** — требует mock ArcadeDB (WireMock/json-server) без внешнего HoundArcade
+- **Telegram notify** — опционально, после появления сервера
+
+### Что нужно от тебя для активации деплоя
+1. Сервер с Docker (Ubuntu 22.04, 2+ GB RAM)
+2. Добавить 4 секрета в GitHub → Settings → Secrets:
+   `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, `GHCR_TOKEN`
+3. Инструкция: `internal_docs/instructions/CICD_SETUP.md`
+
+---
+
 ## Контекст
 
 Текущий CI (ci.yml): lint + test + build на 3 сервиса параллельно, все зелёные.
