@@ -118,7 +118,7 @@ export const Header = memo(() => {
             background: seerMenuOpen ? 'var(--bg2)' : 'transparent',
             border: '1px solid',
             borderColor: seerMenuOpen ? 'var(--bd)' : 'transparent',
-            borderRadius: '6px',
+            borderRadius: 'var(--seer-radius-md)',
             cursor: 'pointer',
             transition: 'background 0.12s, border-color 0.12s',
           }}
@@ -152,7 +152,7 @@ export const Header = memo(() => {
             position: 'absolute', top: 'calc(100% + 4px)', left: 0,
             zIndex: 300, minWidth: '220px',
             background: 'var(--bg1)', border: '1px solid var(--bd)',
-            borderRadius: '8px',
+            borderRadius: 'var(--seer-radius-lg)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
             overflow: 'hidden',
           }}>
@@ -227,7 +227,7 @@ export const Header = memo(() => {
           fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em',
           color: 'var(--t1)',
           background: 'transparent', border: 'none',
-          cursor: 'pointer', borderRadius: '4px',
+          cursor: 'pointer', borderRadius: 'var(--seer-radius-sm)',
           transition: 'color 0.12s',
           flexShrink: 0,
         }}
@@ -258,7 +258,7 @@ export const Header = memo(() => {
                   padding: '6px 14px',
                   fontSize: '12px',
                   fontWeight: isSub ? 500 : 400,
-                  borderRadius: '4px',
+                  borderRadius: 'var(--seer-radius-sm)',
                   border: 'none',
                   cursor: isEnabled ? 'pointer' : 'not-allowed',
                   background: isSub
@@ -295,7 +295,7 @@ export const Header = memo(() => {
           padding: '5px 10px',
           background: 'var(--bg2)',
           border: '1px solid var(--bd)',
-          borderRadius: '6px',
+          borderRadius: 'var(--seer-radius-md)',
           color: 'var(--t2)', fontSize: '11px',
           cursor: 'pointer',
         }}
@@ -315,7 +315,7 @@ export const Header = memo(() => {
           padding: '5px 10px',
           background: 'var(--bg2)',
           border: '1px solid var(--bd)',
-          borderRadius: '6px',
+          borderRadius: 'var(--seer-radius-md)',
           color: 'var(--t2)', fontSize: '11px',
           cursor: 'pointer',
         }}
@@ -334,7 +334,7 @@ export const Header = memo(() => {
           style={{
             background: 'transparent',
             border: '1px solid var(--bd)',
-            borderRadius: '6px',
+            borderRadius: 'var(--seer-radius-md)',
             padding: '5px 7px',
             cursor: 'pointer',
             color: paletteMenuOpen ? 'var(--acc)' : 'var(--t2)',
@@ -350,7 +350,7 @@ export const Header = memo(() => {
             position: 'absolute', top: 'calc(100% + 4px)', right: 0,
             zIndex: 300, minWidth: '160px',
             background: 'var(--bg1)', border: '1px solid var(--bd)',
-            borderRadius: '8px',
+            borderRadius: 'var(--seer-radius-lg)',
             boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
             overflow: 'hidden',
           }}>
@@ -403,7 +403,7 @@ export const Header = memo(() => {
         style={{
           background: 'transparent',
           border: '1px solid var(--bd)',
-          borderRadius: '6px',
+          borderRadius: 'var(--seer-radius-md)',
           padding: '5px 7px',
           cursor: 'pointer',
           color: 'var(--t2)',
@@ -425,7 +425,7 @@ export const Header = memo(() => {
             padding: '4px 8px 4px 5px',
             background: 'transparent',
             border: '1px solid transparent',
-            borderRadius: '6px',
+            borderRadius: 'var(--seer-radius-md)',
             cursor: 'pointer',
             transition: 'background 0.12s, border-color 0.12s',
           }}
